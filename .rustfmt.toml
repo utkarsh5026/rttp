@@ -1,0 +1,21 @@
+edition = "2024"
+
+# Imports
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"
+
+# Line length — pragmatic for modern displays and Rust's verbose type syntax
+max_width = 100
+comment_width = 100
+wrap_comments = true
+
+# Functions
+fn_args_layout = "Tall"
+trailing_comma = "Vertical"
+trailing_semicolon = true
+
+# Misc
+use_small_heuristics = "Default"
+newline_style = "Unix"
+normalize_comments = true
+normalize_doc_attributes = true

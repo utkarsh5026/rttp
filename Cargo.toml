@@ -1,0 +1,63 @@
+[package]
+name = "rttp"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["Utkarsh Priyadarshi"]
+description = "A from-scratch async HTTP/1.1 server framework in Rust"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/utkarshpriyadarshi/rttp"
+keywords = ["http", "server", "async", "web", "framework"]
+categories = [
+    "network-programming",
+    "web-programming::http-server",
+    "asynchronous",
+]
+
+[lib]
+name = "rttp"
+path = "src/lib.rs"
+
+[[example]]
+name = "hello_world"
+path = "examples/hello_world.rs"
+
+[dependencies]
+# Async runtime — selective features for leaner compile times in library consumers
+tokio = { version = "1", features = [
+    "net",
+    "io-util",
+    "rt-multi-thread",
+    "macros",
+    "time",
+    "sync",
+] }
+
+# Zero-copy HTTP/1.x push parser
+httparse = "1"
+
+# Ergonomic error derive macros
+thiserror = "2"
+
+# Tokio-ecosystem byte buffer
+bytes = "1"
+
+# Structured logging (consumers wire up their own subscriber)
+tracing = "0.1"
+
+[dev-dependencies]
+# Full tokio runtime for examples and integration tests
+tokio = { version = "1", features = ["full"] }
+# Subscriber for examples — not exposed to library consumers
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
