@@ -46,6 +46,10 @@ bytes = "1"
 # Structured logging (consumers wire up their own subscriber)
 tracing = "0.1"
 
+# Serialization/deserialization framework
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
 [dev-dependencies]
 # Full tokio runtime for examples and integration tests
 tokio = { version = "1", features = ["full"] }
