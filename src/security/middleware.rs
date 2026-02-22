@@ -14,6 +14,7 @@
 //! - CSRF protection
 //! - Secure header injection (HSTS, CSP, X-Frame-Options)
 
+use std::future::Future;
 use std::pin::Pin;
 
 use crate::{
@@ -54,6 +55,8 @@ pub struct CorsMiddleware {
     allowed_origins: Vec<String>,
     allowed_methods: Vec<String>,
     allowed_headers: Vec<String>,
+    allow_credentials: bool,
+    expose_headers: Vec<String>,
 }
 
 impl Default for CorsMiddleware {
@@ -91,6 +94,8 @@ impl CorsMiddleware {
                 "DELETE".to_string(),
             ],
             allowed_headers: vec!["Content-Type".to_string(), "Authorization".to_string()],
+            allow_credentials: false,
+            expose_headers: Vec::new(),
         }
     }
 
@@ -99,6 +104,11 @@ impl CorsMiddleware {
     /// Pass `"*"` to permit all origins. When the allow-list contains `"*"`,
     /// every `Origin` value is accepted and the response carries
     /// `Access-Control-Allow-Origin: *`.
+    ///
+    /// When a **specific** origin is added the default wildcard `"*"` is removed
+    /// so that origin restrictions are not silently masked. Subsequent calls with
+    /// additional specific origins extend the allow-list without re-introducing the
+    /// wildcard.
     ///
     /// # Arguments
     ///
@@ -115,7 +125,13 @@ impl CorsMiddleware {
     /// ```
     #[must_use]
     pub fn allow_origin(mut self, origin: impl Into<String>) -> Self {
-        self.allowed_origins.push(origin.into());
+        let origin = origin.into();
+        if origin != "*" {
+            // Transition from the default wildcard to an explicit allow-list so that
+            // restrictions are not silently masked by the pre-seeded "*".
+            self.allowed_origins.retain(|o| o != "*");
+        }
+        self.allowed_origins.push(origin);
         self
     }
 
@@ -139,6 +155,50 @@ impl CorsMiddleware {
     #[must_use]
     pub fn allow_method(mut self, method: impl Into<String>) -> Self {
         self.allowed_methods.push(method.into());
+        self
+    }
+
+    /// Controls whether credentials (cookies, HTTP authentication) are included.
+    ///
+    /// When set to `true`, the `Access-Control-Allow-Credentials: true` header
+    /// is added to both preflight and actual responses. Per the CORS spec, when
+    /// credentials are allowed and the allow-list contains `"*"`, the actual request
+    /// origin is reflected instead of `"*"` (browsers reject credentialed requests
+    /// paired with `Access-Control-Allow-Origin: *`).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rttp::security::CorsMiddleware;
+    ///
+    /// let cors = CorsMiddleware::new().allow_credentials(true);
+    /// ```
+    #[must_use]
+    pub fn allow_credentials(mut self, allow: bool) -> Self {
+        self.allow_credentials = allow;
+        self
+    }
+
+    /// Adds a header name to the `Access-Control-Expose-Headers` list.
+    ///
+    /// Exposed headers are accessible to browser JavaScript via
+    /// `XMLHttpRequest.getResponseHeader()` or the Fetch API. By default no
+    /// headers beyond the CORS-safelisted ones are exposed.
+    ///
+    /// # Arguments
+    ///
+    /// - `header` — an HTTP header name (e.g. `"X-Request-ID"`).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rttp::security::CorsMiddleware;
+    ///
+    /// let cors = CorsMiddleware::new().expose_header("X-Request-ID");
+    /// ```
+    #[must_use]
+    pub fn expose_header(mut self, header: impl Into<String>) -> Self {
+        self.expose_headers.push(header.into());
         self
     }
 
@@ -196,46 +256,371 @@ impl Middleware for CorsMiddleware {
         let allowed_origins = self.allowed_origins.clone();
         let allowed_methods = self.allowed_methods.clone();
         let allowed_headers = self.allowed_headers.clone();
+        let allow_credentials = self.allow_credentials;
+        let exposed_headers = self.expose_headers.clone();
 
         Box::pin(async move {
-            let request_origin = ctx.request().headers().get("origin").map(str::to_owned);
-            let is_preflight = ctx.request().method() == &crate::Method::Options;
+            let req_headers = ctx.request().headers();
+            let request_origin = req_headers.get("origin").map(str::to_owned);
+            let is_preflight = ctx.request().method() == &crate::Method::Options
+                && req_headers.contains("access-control-request-method");
             let Some(origin) = request_origin else {
                 return next.run(ctx).await;
             };
 
             let allow_origin = if allowed_origins.iter().any(|o| o == "*") {
-                "*".to_owned()
+                if allow_credentials { origin.clone() } else { "*".to_owned() }
             } else if allowed_origins.contains(&origin) {
                 origin.clone()
             } else {
-                return next.run(ctx).await;
+                if is_preflight {
+                    // If a preflight fails the origin check, DO NOT call next.run().
+                    // Kill it immediately so it doesn't hit your application logic.
+                    return Response::new(crate::StatusCode::Forbidden);
+                } else {
+                    // For actual requests, let the app process it, but don't attach CORS headers.
+                    // The browser will block the response on the client side.
+                    return next.run(ctx).await;
+                }
             };
 
-            let methods_str = allowed_methods.join(", ");
-            let headers_str = allowed_headers.join(", ");
             let is_wildcard = allow_origin == "*";
 
             if is_preflight {
                 let mut resp = Response::new(crate::StatusCode::NoContent)
                     .header("Access-Control-Allow-Origin", &allow_origin)
-                    .header("Access-Control-Allow-Methods", &methods_str)
-                    .header("Access-Control-Allow-Headers", &headers_str)
-                    .header("Access-Control-Max-Age", "3600");
+                    .header("Access-Control-Max-Age", "86400"); // 24 hours is a modern standard
+
+                if !allowed_methods.is_empty() {
+                    resp.add_header("Access-Control-Allow-Methods", allowed_methods.join(", "));
+                }
+                if !allowed_headers.is_empty() {
+                    resp.add_header("Access-Control-Allow-Headers", allowed_headers.join(", "));
+                }
+
+                if allow_credentials {
+                    resp.add_header("Access-Control-Allow-Credentials", "true");
+                }
+
                 if !is_wildcard {
                     resp.add_header("Vary", "Origin");
                 }
+
                 return resp;
             }
 
             let mut resp = next.run(ctx).await;
             resp.add_header("Access-Control-Allow-Origin", &allow_origin);
-            resp.add_header("Access-Control-Allow-Methods", &methods_str);
-            resp.add_header("Access-Control-Allow-Headers", &headers_str);
+
+            if allow_credentials {
+                resp.add_header("Access-Control-Allow-Credentials", "true");
+            }
+
+            if !exposed_headers.is_empty() {
+                resp.add_header("Access-Control-Expose-Headers", &exposed_headers.join(", "));
+            }
+
             if !is_wildcard {
                 resp.add_header("Vary", "Origin");
             }
+
             resp
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::{
+        Response, StatusCode,
+        context::Context,
+        middleware::{MiddlewareHandler, Next},
+    };
+
+    /// Builds a `Context` by parsing a raw HTTP/1.1 request byte slice.
+    fn make_context(raw: &[u8]) -> Context {
+        let (req, _) = crate::Request::parse(raw).unwrap();
+        Context::new(req)
+    }
+
+    /// Returns a `Next` whose only handler always responds with `200 OK`.
+    fn ok_next() -> Next {
+        let handler: MiddlewareHandler = Arc::new(|_ctx: Context, _next: Next| {
+            Box::pin(async { Response::new(StatusCode::Ok) })
+        });
+        Next::new(vec![handler])
+    }
+
+    /// Serializes a `Response` to its HTTP/1.1 wire representation.
+    fn wire(response: Response) -> String {
+        String::from_utf8(response.into_bytes().to_vec()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn no_origin_passes_through_unchanged() {
+        let cors = CorsMiddleware::new();
+        let ctx = make_context(b"GET /api HTTP/1.1\r\nHost: localhost\r\n\r\n");
+
+        let resp = cors.handle(ctx, ok_next()).await;
+
+        let w = wire(resp);
+        assert!(w.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(!w.contains("Access-Control-Allow-Origin"));
+    }
+
+    #[tokio::test]
+    async fn wildcard_accepts_any_origin_and_returns_star() {
+        let cors = CorsMiddleware::new();
+        let ctx = make_context(
+            b"GET /api HTTP/1.1\r\nHost: localhost\r\nOrigin: https://random.io\r\n\r\n",
+        );
+
+        let resp = cors.handle(ctx, ok_next()).await;
+        let w = wire(resp);
+
+        assert!(w.contains("Access-Control-Allow-Origin: *\r\n"));
+        assert!(!w.contains("Vary: Origin"));
+    }
+
+    #[tokio::test]
+    async fn specific_origin_match_reflects_origin_and_adds_vary() {
+        let cors = CorsMiddleware::new().allow_origin("https://example.com");
+        let ctx = make_context(
+            b"GET /api HTTP/1.1\r\nHost: localhost\r\nOrigin: https://example.com\r\n\r\n",
+        );
+
+        let resp = cors.handle(ctx, ok_next()).await;
+        let w = wire(resp);
+
+        assert!(w.contains("Access-Control-Allow-Origin: https://example.com\r\n"));
+        assert!(w.contains("Vary: Origin\r\n"));
+    }
+
+    #[tokio::test]
+    async fn specific_origin_mismatch_no_cors_headers() {
+        let cors = CorsMiddleware::new().allow_origin("https://trusted.com");
+        let ctx = make_context(
+            b"GET /api HTTP/1.1\r\nHost: localhost\r\nOrigin: https://attacker.com\r\n\r\n",
+        );
+
+        let resp = cors.handle(ctx, ok_next()).await;
+        let status = resp.status();
+        let w = wire(resp);
+
+        assert_eq!(status, StatusCode::Ok);
+        assert!(!w.contains("Access-Control-Allow-Origin"));
+    }
+
+    #[tokio::test]
+    async fn allow_origin_builder_restricts_wildcard_default() {
+        let cors = CorsMiddleware::new().allow_origin("https://trusted.com");
+        let ctx = make_context(
+            b"GET /api HTTP/1.1\r\nHost: localhost\r\nOrigin: https://other.com\r\n\r\n",
+        );
+
+        let resp = cors.handle(ctx, ok_next()).await;
+        assert!(!wire(resp).contains("Access-Control-Allow-Origin"));
+    }
+
+    #[tokio::test]
+    async fn multiple_allowed_origins_each_accepted() {
+        let cors = CorsMiddleware::new()
+            .allow_origin("https://app.example.com")
+            .allow_origin("https://staging.example.com");
+
+        for origin in &["https://app.example.com", "https://staging.example.com"] {
+            let raw = format!(
+                "GET /api HTTP/1.1\r\nHost: localhost\r\nOrigin: {origin}\r\n\r\n"
+            );
+            let ctx = make_context(raw.as_bytes());
+            let resp = cors.handle(ctx, ok_next()).await;
+            assert!(
+                wire(resp).contains(&format!("Access-Control-Allow-Origin: {origin}\r\n")),
+                "expected CORS header for origin {origin}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn preflight_wildcard_returns_204_with_cors_headers() {
+        let cors = CorsMiddleware::new();
+        let ctx = make_context(
+            b"OPTIONS /api HTTP/1.1\r\nHost: localhost\r\nOrigin: https://example.com\r\n\
+              Access-Control-Request-Method: POST\r\n\r\n",
+        );
+
+        let resp = cors.handle(ctx, ok_next()).await;
+        let status = resp.status();
+        let w = wire(resp);
+
+        assert_eq!(status, StatusCode::NoContent);
+        assert!(w.contains("Access-Control-Allow-Origin: *\r\n"));
+        assert!(w.contains("Access-Control-Max-Age: 86400\r\n"));
+        assert!(w.contains("Access-Control-Allow-Methods:"));
+        assert!(w.contains("Access-Control-Allow-Headers:"));
+        // Wildcard must NOT add Vary: Origin on preflight either
+        assert!(!w.contains("Vary: Origin"));
+    }
+
+    #[tokio::test]
+    async fn preflight_specific_origin_returns_204_with_vary() {
+        let cors = CorsMiddleware::new().allow_origin("https://example.com");
+        let ctx = make_context(
+            b"OPTIONS /api HTTP/1.1\r\nHost: localhost\r\nOrigin: https://example.com\r\n\
+              Access-Control-Request-Method: DELETE\r\n\r\n",
+        );
+
+        let resp = cors.handle(ctx, ok_next()).await;
+        let status = resp.status();
+        let w = wire(resp);
+
+        assert_eq!(status, StatusCode::NoContent);
+        assert!(w.contains("Access-Control-Allow-Origin: https://example.com\r\n"));
+        assert!(w.contains("Vary: Origin\r\n"));
+    }
+
+    #[tokio::test]
+    async fn preflight_rejected_origin_returns_403() {
+        let cors = CorsMiddleware::new().allow_origin("https://trusted.com");
+        let ctx = make_context(
+            b"OPTIONS /api HTTP/1.1\r\nHost: localhost\r\nOrigin: https://attacker.com\r\n\
+              Access-Control-Request-Method: POST\r\n\r\n",
+        );
+
+        let resp = cors.handle(ctx, ok_next()).await;
+        assert_eq!(resp.status(), StatusCode::Forbidden);
+    }
+
+    /// An `OPTIONS` request without `Access-Control-Request-Method` is NOT a
+    /// preflight — it must be treated as an ordinary request.
+    #[tokio::test]
+    async fn options_without_acr_method_is_not_preflight() {
+        let cors = CorsMiddleware::new();
+        let ctx = make_context(
+            b"OPTIONS /api HTTP/1.1\r\nHost: localhost\r\nOrigin: https://example.com\r\n\r\n",
+        );
+
+        let resp = cors.handle(ctx, ok_next()).await;
+        let status = resp.status();
+        let w = wire(resp);
+
+        // next.run() is called → 200 from stub handler
+        assert_eq!(status, StatusCode::Ok);
+        // But CORS header IS still present (it's a cross-origin actual request)
+        assert!(w.contains("Access-Control-Allow-Origin: *\r\n"));
+    }
+
+    // ── Credentials ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn credentials_with_wildcard_reflects_origin_not_star() {
+        // Per the CORS spec, credentials + wildcard must echo the real origin.
+        let cors = CorsMiddleware::new().allow_credentials(true);
+        let ctx = make_context(
+            b"GET /api HTTP/1.1\r\nHost: localhost\r\nOrigin: https://example.com\r\n\r\n",
+        );
+
+        let resp = cors.handle(ctx, ok_next()).await;
+        let w = wire(resp);
+
+        assert!(w.contains("Access-Control-Allow-Origin: https://example.com\r\n"));
+        assert!(!w.contains("Access-Control-Allow-Origin: *"));
+        assert!(w.contains("Access-Control-Allow-Credentials: true\r\n"));
+    }
+
+    #[tokio::test]
+    async fn credentials_with_specific_origin_adds_header() {
+        let cors = CorsMiddleware::new()
+            .allow_origin("https://example.com")
+            .allow_credentials(true);
+        let ctx = make_context(
+            b"GET /api HTTP/1.1\r\nHost: localhost\r\nOrigin: https://example.com\r\n\r\n",
+        );
+
+        let resp = cors.handle(ctx, ok_next()).await;
+        let w = wire(resp);
+
+        assert!(w.contains("Access-Control-Allow-Origin: https://example.com\r\n"));
+        assert!(w.contains("Access-Control-Allow-Credentials: true\r\n"));
+    }
+
+    #[tokio::test]
+    async fn credentials_on_preflight_adds_header() {
+        let cors = CorsMiddleware::new().allow_credentials(true);
+        let ctx = make_context(
+            b"OPTIONS /api HTTP/1.1\r\nHost: localhost\r\nOrigin: https://example.com\r\n\
+              Access-Control-Request-Method: POST\r\n\r\n",
+        );
+
+        let resp = cors.handle(ctx, ok_next()).await;
+        let status = resp.status();
+        let w = wire(resp);
+
+        assert_eq!(status, StatusCode::NoContent);
+        assert!(w.contains("Access-Control-Allow-Credentials: true\r\n"));
+    }
+
+    // ── Expose-Headers ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn expose_header_appears_on_actual_response() {
+        let cors = CorsMiddleware::new().expose_header("X-Request-ID");
+        let ctx = make_context(
+            b"GET /api HTTP/1.1\r\nHost: localhost\r\nOrigin: https://example.com\r\n\r\n",
+        );
+
+        let resp = cors.handle(ctx, ok_next()).await;
+        assert!(wire(resp).contains("Access-Control-Expose-Headers: X-Request-ID\r\n"));
+    }
+
+    #[tokio::test]
+    async fn multiple_expose_headers_are_joined() {
+        let cors = CorsMiddleware::new()
+            .expose_header("X-Request-ID")
+            .expose_header("X-Trace-ID");
+        let ctx = make_context(
+            b"GET /api HTTP/1.1\r\nHost: localhost\r\nOrigin: https://example.com\r\n\r\n",
+        );
+
+        let resp = cors.handle(ctx, ok_next()).await;
+        assert!(
+            wire(resp).contains("Access-Control-Expose-Headers: X-Request-ID, X-Trace-ID\r\n")
+        );
+    }
+
+    // ── Allow-Methods / Allow-Headers on preflight ────────────────────────────
+
+    #[tokio::test]
+    async fn preflight_contains_custom_method() {
+        let cors = CorsMiddleware::new().allow_method("PATCH");
+        let ctx = make_context(
+            b"OPTIONS /api HTTP/1.1\r\nHost: localhost\r\nOrigin: https://example.com\r\n\
+              Access-Control-Request-Method: PATCH\r\n\r\n",
+        );
+
+        let resp = cors.handle(ctx, ok_next()).await;
+        let w = wire(resp);
+
+        assert!(w.contains("PATCH"), "expected PATCH in Allow-Methods: {w}");
+    }
+
+    #[tokio::test]
+    async fn preflight_contains_custom_header() {
+        let cors = CorsMiddleware::new().allow_header("X-Custom-Token");
+        let ctx = make_context(
+            b"OPTIONS /api HTTP/1.1\r\nHost: localhost\r\nOrigin: https://example.com\r\n\
+              Access-Control-Request-Method: POST\r\n\r\n",
+        );
+
+        let resp = cors.handle(ctx, ok_next()).await;
+        let w = wire(resp);
+
+        assert!(
+            w.contains("X-Custom-Token"),
+            "expected X-Custom-Token in Allow-Headers: {w}"
+        );
     }
 }
