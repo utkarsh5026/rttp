@@ -49,6 +49,12 @@ impl Response {
         self
     }
 
+    /// Appends a header in-place. Intended for middleware pipelines that receive
+    /// a `Response` from downstream and need to decorate it without consuming it.
+    pub fn add_header(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        self.headers.insert(name, value);
+    }
+
     /// Sets the response body from a string.
     ///
     /// The `Content-Length` header is written automatically by [`into_bytes`](Self::into_bytes).
