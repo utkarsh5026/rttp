@@ -23,7 +23,7 @@
 //! - Short-circuit responses (auth checks, rate limiting)
 //! - Async-first middleware trait
 
-use std::{pin::Pin, sync::Arc};
+use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::time::Instant;
 
 use crate::{Response, context::Context};
@@ -81,6 +81,27 @@ pub struct Next {
 pub type MiddlewareHandler = Arc<
     dyn Fn(Context, Next) -> Pin<Box<dyn Future<Output = Response> + Send>> + Send + Sync + 'static,
 >;
+
+/// Converts a [`Middleware`] implementation into a [`MiddlewareHandler`].
+///
+/// # Arguments
+///
+/// - `middleware` — a reference-counted [`Middleware`] to wrap.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use std::sync::Arc;
+/// use rttp::middleware::{LoggerMiddleware, from_middleware};
+///
+/// let handler = from_middleware(Arc::new(LoggerMiddleware));
+/// ```
+pub fn from_middleware<M>(middleware: Arc<M>) -> MiddlewareHandler
+where
+    M: Middleware + 'static,
+{
+    Arc::new(move |ctx: Context, next: Next| middleware.handle(ctx, next))
+}
 
 impl Next {
     /// Creates a new `Next` positioned at the start of the given middleware stack.
