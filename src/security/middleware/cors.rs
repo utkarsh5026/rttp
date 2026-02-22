@@ -1,29 +1,15 @@
-//! Security middleware — authentication, authorization, CORS, and rate limiting.
+//! CORS (Cross-Origin Resource Sharing) middleware.
 //!
-//! This module provides middleware implementations for common HTTP security concerns.
-//! Currently implemented:
-//!
-//! - [`CorsMiddleware`] — Cross-Origin Resource Sharing header injection and
-//!   preflight (`OPTIONS`) short-circuiting.
-//! - [`JwtMiddleware`] — Bearer-token JWT authentication; short-circuits with
-//!   `401 Unauthorized` and injects verified [`Claims`] into the request context.
-//!
-//! ## Planned Features
-//!
-//! - API key validation
-//! - Per-route rate limiting (token bucket / sliding window)
-//! - CSRF protection
-//! - Secure header injection (HSTS, CSP, X-Frame-Options)
+//! Validates the `Origin` header, handles preflight (`OPTIONS`) requests,
+//! and injects `Access-Control-*` response headers on actual requests.
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 
 use crate::{
     Response,
     context::Context,
     middleware::{Middleware, Next},
-    security::auth::{Claims, JwtAuth},
 };
 
 /// CORS middleware — validates the `Origin` header, handles preflight requests,
@@ -243,18 +229,6 @@ impl Middleware for CorsMiddleware {
     ///    `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods`, and
     ///    `Access-Control-Allow-Headers` to its response. A `Vary: Origin` header is
     ///    added when a specific (non-wildcard) origin is echoed back.
-    ///
-    /// # Arguments
-    ///
-    /// - `ctx` — the per-request [`Context`] carrying the HTTP method, headers, path,
-    ///   and extensions.
-    /// - `next` — the remainder of the middleware chain; invoke [`Next::run`] to
-    ///   forward the request to the next layer.
-    ///
-    /// # Returns
-    ///
-    /// A [`Response`] with CORS headers applied, or the unmodified downstream
-    /// response when the origin check does not pass.
     fn handle(&self, ctx: Context, next: Next) -> Pin<Box<dyn Future<Output = Response> + Send>> {
         let allowed_origins = self.allowed_origins.clone();
         let allowed_methods = self.allowed_methods.clone();
@@ -330,120 +304,21 @@ impl Middleware for CorsMiddleware {
     }
 }
 
-/// JWT Bearer-token authentication middleware.
-///
-/// Extracts the `Authorization: Bearer <token>` header from each incoming
-/// request, verifies the JWT using the configured [`JwtAuth`], and — on
-/// success — injects the decoded [`Claims`] into [`Context::extensions`] so
-/// downstream handlers can retrieve them with
-/// `ctx.extensions().get::<Claims>()`.
-///
-/// On failure the middleware **short-circuits** the pipeline and returns
-/// `401 Unauthorized` with a `WWW-Authenticate: Bearer` header. The downstream
-/// handler is **not** called.
-///
-/// # Examples
-///
-/// ```rust,no_run
-/// use std::sync::Arc;
-/// use rttp::security::auth::{Claims, JwtAuth};
-/// use rttp::security::middleware::JwtMiddleware;
-/// use rttp::middleware::from_middleware;
-///
-/// let auth = JwtAuth::hs256(b"my-secret");
-/// let jwt_mw = from_middleware(Arc::new(JwtMiddleware::new(auth)));
-/// ```
-pub struct JwtMiddleware {
-    auth: Arc<JwtAuth>,
-}
-
-impl JwtMiddleware {
-    /// Create a new `JwtMiddleware` from a [`JwtAuth`] instance.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use rttp::security::auth::JwtAuth;
-    /// use rttp::security::middleware::JwtMiddleware;
-    ///
-    /// let mw = JwtMiddleware::new(JwtAuth::hs256(b"secret"));
-    /// ```
-    pub fn new(auth: JwtAuth) -> Self {
-        Self {
-            auth: Arc::new(auth),
-        }
-    }
-}
-
-impl Middleware for JwtMiddleware {
-    /// Authenticate the request via the `Authorization: Bearer <token>` header.
-    ///
-    /// # Behavior
-    ///
-    /// 1. Reads the `authorization` request header.
-    /// 2. If missing, returns `401 Unauthorized` immediately.
-    /// 3. Calls [`JwtAuth::verify_bearer`] on the header value.
-    /// 4. If the token is invalid or expired, returns `401 Unauthorized`.
-    /// 5. On success, injects the decoded [`Claims`] into `ctx.extensions` and
-    ///    delegates to the next middleware.
-    ///
-    /// # Arguments
-    ///
-    /// - `ctx` — the per-request context.
-    /// - `next` — remainder of the middleware chain.
-    ///
-    /// # Returns
-    ///
-    /// Either a `401` response (unauthenticated) or the response produced by
-    /// the downstream handler.
-    fn handle(&self, ctx: Context, next: Next) -> Pin<Box<dyn Future<Output = Response> + Send>> {
-        let auth = Arc::clone(&self.auth);
-
-        Box::pin(async move {
-            let authorization = ctx
-                .request()
-                .headers()
-                .get("authorization")
-                .map(str::to_owned);
-
-            let Some(auth_header) = authorization else {
-                return Response::new(crate::StatusCode::Unauthorized)
-                    .header("WWW-Authenticate", "Bearer")
-                    .body("Missing Authorization header");
-            };
-
-            match auth.verify_bearer::<Claims>(&auth_header) {
-                Ok(claims) => {
-                    let mut ctx = ctx;
-                    ctx.extensions_mut().insert(claims);
-                    next.run(ctx).await
-                }
-                Err(_) => Response::new(crate::StatusCode::Unauthorized)
-                    .header("WWW-Authenticate", r#"Bearer error="invalid_token""#)
-                    .body("Invalid or expired token"),
-            }
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
     use crate::{
         Response, StatusCode,
         context::Context,
         middleware::{MiddlewareHandler, Next},
     };
+    use std::sync::Arc;
 
-    /// Builds a `Context` by parsing a raw HTTP/1.1 request byte slice.
     fn make_context(raw: &[u8]) -> Context {
         let (req, _) = crate::Request::parse(raw).unwrap();
         Context::new(req)
     }
 
-    /// Returns a `Next` whose only handler always responds with `200 OK`.
     fn ok_next() -> Next {
         let handler: MiddlewareHandler = Arc::new(|_ctx: Context, _next: Next| {
             Box::pin(async { Response::new(StatusCode::Ok) })
@@ -451,7 +326,6 @@ mod tests {
         Next::new(vec![handler])
     }
 
-    /// Serializes a `Response` to its HTTP/1.1 wire representation.
     fn wire(response: Response) -> String {
         String::from_utf8(response.into_bytes().to_vec()).unwrap()
     }
@@ -556,7 +430,6 @@ mod tests {
         assert!(w.contains("Access-Control-Max-Age: 86400\r\n"));
         assert!(w.contains("Access-Control-Allow-Methods:"));
         assert!(w.contains("Access-Control-Allow-Headers:"));
-        // Wildcard must NOT add Vary: Origin on preflight either
         assert!(!w.contains("Vary: Origin"));
     }
 
@@ -602,9 +475,7 @@ mod tests {
         let status = resp.status();
         let w = wire(resp);
 
-        // next.run() is called → 200 from stub handler
         assert_eq!(status, StatusCode::Ok);
-        // But CORS header IS still present (it's a cross-origin actual request)
         assert!(w.contains("Access-Control-Allow-Origin: *\r\n"));
     }
 
@@ -612,7 +483,6 @@ mod tests {
 
     #[tokio::test]
     async fn credentials_with_wildcard_reflects_origin_not_star() {
-        // Per the CORS spec, credentials + wildcard must echo the real origin.
         let cors = CorsMiddleware::new().allow_credentials(true);
         let ctx = make_context(
             b"GET /api HTTP/1.1\r\nHost: localhost\r\nOrigin: https://example.com\r\n\r\n",
@@ -681,7 +551,9 @@ mod tests {
         );
 
         let resp = cors.handle(ctx, ok_next()).await;
-        assert!(wire(resp).contains("Access-Control-Expose-Headers: X-Request-ID, X-Trace-ID\r\n"));
+        assert!(
+            wire(resp).contains("Access-Control-Expose-Headers: X-Request-ID, X-Trace-ID\r\n")
+        );
     }
 
     // ── Allow-Methods / Allow-Headers on preflight ────────────────────────────
