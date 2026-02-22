@@ -98,7 +98,11 @@ impl Response {
                 .insert("Content-Type", "text/plain; charset=utf-8");
         }
 
-        let connection = if self.keep_alive { "keep-alive" } else { "close" };
+        let connection = if self.keep_alive {
+            "keep-alive"
+        } else {
+            "close"
+        };
         self.headers.insert("Connection", connection);
 
         let estimated_size = 128 + self.headers.len() * 64 + content_length;

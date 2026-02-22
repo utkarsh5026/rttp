@@ -19,9 +19,6 @@ categories = [
 name = "rttp"
 path = "src/lib.rs"
 
-[[example]]
-name = "hello_world"
-path = "examples/hello_world.rs"
 
 [dependencies]
 # Async runtime — selective features for leaner compile times in library consumers
