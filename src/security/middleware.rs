@@ -5,10 +5,11 @@
 //!
 //! - [`CorsMiddleware`] — Cross-Origin Resource Sharing header injection and
 //!   preflight (`OPTIONS`) short-circuiting.
+//! - [`JwtMiddleware`] — Bearer-token JWT authentication; short-circuits with
+//!   `401 Unauthorized` and injects verified [`Claims`] into the request context.
 //!
 //! ## Planned Features
 //!
-//! - JWT authentication middleware
 //! - API key validation
 //! - Per-route rate limiting (token bucket / sliding window)
 //! - CSRF protection
@@ -16,11 +17,13 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use crate::{
     Response,
     context::Context,
     middleware::{Middleware, Next},
+    security::auth::{Claims, JwtAuth},
 };
 
 /// CORS middleware — validates the `Origin` header, handles preflight requests,
@@ -269,19 +272,17 @@ impl Middleware for CorsMiddleware {
             };
 
             let allow_origin = if allowed_origins.iter().any(|o| o == "*") {
-                if allow_credentials { origin.clone() } else { "*".to_owned() }
+                if allow_credentials {
+                    origin.clone()
+                } else {
+                    "*".to_owned()
+                }
             } else if allowed_origins.contains(&origin) {
                 origin.clone()
+            } else if is_preflight {
+                return Response::new(crate::StatusCode::Forbidden);
             } else {
-                if is_preflight {
-                    // If a preflight fails the origin check, DO NOT call next.run().
-                    // Kill it immediately so it doesn't hit your application logic.
-                    return Response::new(crate::StatusCode::Forbidden);
-                } else {
-                    // For actual requests, let the app process it, but don't attach CORS headers.
-                    // The browser will block the response on the client side.
-                    return next.run(ctx).await;
-                }
+                return next.run(ctx).await;
             };
 
             let is_wildcard = allow_origin == "*";
@@ -317,7 +318,7 @@ impl Middleware for CorsMiddleware {
             }
 
             if !exposed_headers.is_empty() {
-                resp.add_header("Access-Control-Expose-Headers", &exposed_headers.join(", "));
+                resp.add_header("Access-Control-Expose-Headers", exposed_headers.join(", "));
             }
 
             if !is_wildcard {
@@ -325,6 +326,102 @@ impl Middleware for CorsMiddleware {
             }
 
             resp
+        })
+    }
+}
+
+/// JWT Bearer-token authentication middleware.
+///
+/// Extracts the `Authorization: Bearer <token>` header from each incoming
+/// request, verifies the JWT using the configured [`JwtAuth`], and — on
+/// success — injects the decoded [`Claims`] into [`Context::extensions`] so
+/// downstream handlers can retrieve them with
+/// `ctx.extensions().get::<Claims>()`.
+///
+/// On failure the middleware **short-circuits** the pipeline and returns
+/// `401 Unauthorized` with a `WWW-Authenticate: Bearer` header. The downstream
+/// handler is **not** called.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use std::sync::Arc;
+/// use rttp::security::auth::{Claims, JwtAuth};
+/// use rttp::security::middleware::JwtMiddleware;
+/// use rttp::middleware::from_middleware;
+///
+/// let auth = JwtAuth::hs256(b"my-secret");
+/// let jwt_mw = from_middleware(Arc::new(JwtMiddleware::new(auth)));
+/// ```
+pub struct JwtMiddleware {
+    auth: Arc<JwtAuth>,
+}
+
+impl JwtMiddleware {
+    /// Create a new `JwtMiddleware` from a [`JwtAuth`] instance.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rttp::security::auth::JwtAuth;
+    /// use rttp::security::middleware::JwtMiddleware;
+    ///
+    /// let mw = JwtMiddleware::new(JwtAuth::hs256(b"secret"));
+    /// ```
+    pub fn new(auth: JwtAuth) -> Self {
+        Self {
+            auth: Arc::new(auth),
+        }
+    }
+}
+
+impl Middleware for JwtMiddleware {
+    /// Authenticate the request via the `Authorization: Bearer <token>` header.
+    ///
+    /// # Behavior
+    ///
+    /// 1. Reads the `authorization` request header.
+    /// 2. If missing, returns `401 Unauthorized` immediately.
+    /// 3. Calls [`JwtAuth::verify_bearer`] on the header value.
+    /// 4. If the token is invalid or expired, returns `401 Unauthorized`.
+    /// 5. On success, injects the decoded [`Claims`] into `ctx.extensions` and
+    ///    delegates to the next middleware.
+    ///
+    /// # Arguments
+    ///
+    /// - `ctx` — the per-request context.
+    /// - `next` — remainder of the middleware chain.
+    ///
+    /// # Returns
+    ///
+    /// Either a `401` response (unauthenticated) or the response produced by
+    /// the downstream handler.
+    fn handle(&self, ctx: Context, next: Next) -> Pin<Box<dyn Future<Output = Response> + Send>> {
+        let auth = Arc::clone(&self.auth);
+
+        Box::pin(async move {
+            let authorization = ctx
+                .request()
+                .headers()
+                .get("authorization")
+                .map(str::to_owned);
+
+            let Some(auth_header) = authorization else {
+                return Response::new(crate::StatusCode::Unauthorized)
+                    .header("WWW-Authenticate", "Bearer")
+                    .body("Missing Authorization header");
+            };
+
+            match auth.verify_bearer::<Claims>(&auth_header) {
+                Ok(claims) => {
+                    let mut ctx = ctx;
+                    ctx.extensions_mut().insert(claims);
+                    next.run(ctx).await
+                }
+                Err(_) => Response::new(crate::StatusCode::Unauthorized)
+                    .header("WWW-Authenticate", r#"Bearer error="invalid_token""#)
+                    .body("Invalid or expired token"),
+            }
         })
     }
 }
@@ -432,9 +529,7 @@ mod tests {
             .allow_origin("https://staging.example.com");
 
         for origin in &["https://app.example.com", "https://staging.example.com"] {
-            let raw = format!(
-                "GET /api HTTP/1.1\r\nHost: localhost\r\nOrigin: {origin}\r\n\r\n"
-            );
+            let raw = format!("GET /api HTTP/1.1\r\nHost: localhost\r\nOrigin: {origin}\r\n\r\n");
             let ctx = make_context(raw.as_bytes());
             let resp = cors.handle(ctx, ok_next()).await;
             assert!(
@@ -586,9 +681,7 @@ mod tests {
         );
 
         let resp = cors.handle(ctx, ok_next()).await;
-        assert!(
-            wire(resp).contains("Access-Control-Expose-Headers: X-Request-ID, X-Trace-ID\r\n")
-        );
+        assert!(wire(resp).contains("Access-Control-Expose-Headers: X-Request-ID, X-Trace-ID\r\n"));
     }
 
     // ── Allow-Methods / Allow-Headers on preflight ────────────────────────────
