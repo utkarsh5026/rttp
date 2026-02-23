@@ -50,6 +50,12 @@ serde_json = "1"
 # JWT signing and verification
 jsonwebtoken = "9"
 
+# Cryptographically secure random number generation
+rand = "0.9"
+
+# Base64 encoding/decoding
+base64 = "0.22"
+
 [dev-dependencies]
 # Full tokio runtime for examples and integration tests
 tokio = { version = "1", features = ["full"] }
