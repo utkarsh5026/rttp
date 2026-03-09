@@ -1,35 +1,36 @@
 {
-    "cSpell.words": [
-        "blocklist",
-        "clippy",
-        "codegen",
-        "deadpool",
-        "HSTS",
-        "httparse",
-        "rttp",
-        "safelisted",
-        "thiserror"
-    ],
+  "cSpell.words": [
+    "blocklist",
+    "clippy",
+    "codegen",
+    "deadpool",
+    "HSTS",
+    "httparse",
+    "nosniff",
+    "rttp",
+    "safelisted",
+    "thiserror"
+  ],
 
-    // Rust / rust-analyzer
-    "rust-analyzer.check.command": "clippy",
-    "rust-analyzer.cargo.features": "all",
-    "rust-analyzer.procMacro.enable": true,
-    "rust-analyzer.cargo.buildScripts.enable": true,
-    "rust-analyzer.inlayHints.chainingHints.enable": true,
-    "rust-analyzer.inlayHints.typeHints.enable": true,
-    "rust-analyzer.semanticHighlighting.strings.enable": true,
+  // Rust / rust-analyzer
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.cargo.features": "all",
+  "rust-analyzer.procMacro.enable": true,
+  "rust-analyzer.cargo.buildScripts.enable": true,
+  "rust-analyzer.inlayHints.chainingHints.enable": true,
+  "rust-analyzer.inlayHints.typeHints.enable": true,
+  "rust-analyzer.semanticHighlighting.strings.enable": true,
 
-    // Editor
-    "editor.formatOnSave": true,
-    "editor.rulers": [100],
-    "editor.bracketPairColorization.enabled": true,
-    "editor.semanticHighlighting.enabled": true,
+  // Editor
+  "editor.formatOnSave": true,
+  "editor.rulers": [100],
+  "editor.bracketPairColorization.enabled": true,
+  "editor.semanticHighlighting.enabled": true,
 
-    // File cleanliness
-    "files.trimTrailingWhitespace": true,
-    "files.insertFinalNewline": true,
-    "files.exclude": {
-        "**/target": true
-    }
+  // File cleanliness
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "files.exclude": {
+    "**/target": true
+  }
 }
