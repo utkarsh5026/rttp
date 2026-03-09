@@ -1,10 +1,14 @@
 # rttp Makefile
 #
 # Prerequisites:
-#   cargo install cargo-watch   (for watch / watch-test targets)
-#   cargo install cargo-audit   (for audit target)
+#   cargo install cargo-watch      (for watch / watch-test targets)
+#   cargo install cargo-audit      (for audit target)
+#   cargo install cargo-nextest    (for test target)
+#   cargo install cargo-deny       (for deny target)
+#   cargo install cargo-llvm-cov   (for coverage target)
+#   cargo install bacon            (for bacon target)
 
-.PHONY: all build test lint fmt fmt-check check clean doc doc-build audit run watch watch-test ci help
+.PHONY: all build test lint fmt fmt-check check clean doc doc-build audit deny coverage run watch watch-test bacon ci help
 
 ## all: Run check, lint, and test (default target)
 all: check lint test
@@ -13,9 +17,9 @@ all: check lint test
 build:
 	cargo build --all-targets
 
-## test: Run all unit and integration tests
+## test: Run all unit and integration tests (requires cargo-nextest)
 test:
-	cargo test --all-targets --all-features
+	cargo nextest run --all-targets --all-features
 
 ## lint: Run Clippy — warnings are treated as errors
 lint:
@@ -49,6 +53,14 @@ doc-build:
 audit:
 	cargo audit
 
+## deny: Check licenses, bans, and advisories (requires cargo-deny)
+deny:
+	cargo deny check
+
+## coverage: Generate HTML coverage report and open it (requires cargo-llvm-cov)
+coverage:
+	cargo llvm-cov --all-features --open
+
 ## run: Run the hello_world example (INFO log level)
 run:
 	RUST_LOG=info cargo run --example hello_world
@@ -57,12 +69,16 @@ run:
 watch:
 	RUST_LOG=info cargo watch -x 'run --example hello_world'
 
-## watch-test: Watch for changes and re-run tests (requires cargo-watch)
+## watch-test: Watch for changes and re-run tests (requires cargo-watch + cargo-nextest)
 watch-test:
-	cargo watch -x 'test --all-targets'
+	cargo watch -x 'nextest run --all-targets'
 
-## ci: Simulate the full CI pipeline locally (fmt-check → check → lint → test → audit)
-ci: fmt-check check lint test audit
+## bacon: Start background code checker (requires bacon)
+bacon:
+	bacon
+
+## ci: Simulate the full CI pipeline locally (fmt-check → check → lint → test → audit → deny)
+ci: fmt-check check lint test audit deny
 
 ## help: Show this help message
 help:
