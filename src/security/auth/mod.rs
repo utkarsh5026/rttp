@@ -10,4 +10,5 @@ pub mod api_key;
 pub mod jwt;
 pub mod oauth;
 
+pub use api_key::{ApiKeyIdentity, ApiKeyStore, InMemoryApiKeyStore};
 pub use jwt::{Claims, JwtAuth, JwtError};
