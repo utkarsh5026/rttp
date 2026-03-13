@@ -24,14 +24,10 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
 pub enum StatusCode {
-    // 1xx Informational
-
     /// The server has received the request headers and the client should proceed.
     Continue = 100,
     /// The server is switching to the protocol specified in the `Upgrade` header.
     SwitchingProtocols = 101,
-
-    // 2xx Success
 
     /// The request succeeded.
     Ok = 200,
@@ -45,7 +41,6 @@ pub enum StatusCode {
     PartialContent = 206,
 
     // 3xx Redirection
-
     /// The resource has been permanently moved to a new URL.
     MovedPermanently = 301,
     /// The resource has been temporarily moved to a different URL.
@@ -58,8 +53,6 @@ pub enum StatusCode {
     TemporaryRedirect = 307,
     /// The resource has been permanently moved; future requests should use the new URI.
     PermanentRedirect = 308,
-
-    // 4xx Client Error
 
     /// The server cannot process the request due to a client error (e.g., malformed syntax).
     BadRequest = 400,
@@ -85,10 +78,10 @@ pub enum StatusCode {
     UnsupportedMediaType = 415,
     /// The request was well-formed but could not be followed due to semantic errors.
     UnprocessableEntity = 422,
+    /// The server timed out waiting for the request.
+    RequestTimeout = 408,
     /// The client has sent too many requests in a given amount of time.
     TooManyRequests = 429,
-
-    // 5xx Server Error
 
     /// The server encountered an unexpected condition that prevented it from fulfilling the request.
     InternalServerError = 500,
@@ -155,6 +148,7 @@ impl StatusCode {
             Self::MethodNotAllowed => "Method Not Allowed",
             Self::Conflict => "Conflict",
             Self::Gone => "Gone",
+            Self::RequestTimeout => "Request Timeout",
             Self::LengthRequired => "Length Required",
             Self::PayloadTooLarge => "Payload Too Large",
             Self::UriTooLong => "URI Too Long",
