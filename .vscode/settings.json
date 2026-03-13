@@ -1,14 +1,19 @@
 {
   "cSpell.words": [
+    "Behaviour",
     "blocklist",
     "clippy",
     "codegen",
     "deadpool",
+    "HMAC",
     "HSTS",
     "httparse",
+    "jsonwebtoken",
     "nosniff",
     "rttp",
     "safelisted",
+    "SAMEORIGIN",
+    "serde",
     "thiserror"
   ],
 

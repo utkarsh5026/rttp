@@ -55,6 +55,7 @@ rand = "0.9"
 
 # Base64 encoding/decoding
 base64 = "0.22"
+uuid = { version = "1.22.0", features = ["v4", "fast-rng"] }
 
 [dev-dependencies]
 # Full tokio runtime for examples and integration tests
