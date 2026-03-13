@@ -20,22 +20,19 @@
 //! assert_eq!(decoded.sub, "user-42");
 //! ```
 
-use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Errors produced by JWT signing or verification.
 #[derive(Debug, Error)]
 pub enum JwtError {
-    /// The token is invalid, expired, or has a bad signature.
     #[error("invalid token: {0}")]
     Invalid(#[from] jsonwebtoken::errors::Error),
 
-    /// The `Authorization` header was not present on the request.
     #[error("missing Authorization header")]
     MissingToken,
 
-    /// The `Authorization` header was present but not in `Bearer <token>` form.
     #[error("malformed Authorization header — expected `Bearer <token>`")]
     MalformedHeader,
 }
@@ -44,8 +41,12 @@ pub enum JwtError {
 ///
 /// Contains the registered claims defined by [RFC 7519]:
 /// `sub` (subject) and `exp` (expiry) are required by the default validation
-/// performed in [`JwtAuth::verify`]. `iat` (issued-at) and `iss` (issuer) are
-/// optional and omitted from the token if `None`.
+/// performed in [`JwtAuth::verify`]. `iat` (issued-at), `iss` (issuer), and
+/// `jti` (JWT ID) are optional and omitted from the token if `None`.
+///
+/// The `jti` claim is a unique token identifier used by
+/// [`crate::security::token::blocklist::TokenBlocklist`] for revocation.
+/// Populate it with [`Claims::with_jti`] or [`Claims::with_random_jti`].
 ///
 /// For application-specific data, embed `Claims` inside your own struct that
 /// also derives `Serialize` / `Deserialize`, then pass it to [`JwtAuth::sign`]
@@ -58,9 +59,10 @@ pub enum JwtError {
 /// ```rust
 /// use rttp::security::auth::Claims;
 ///
-/// let claims = Claims::new("user-42", 3600).issuer("my-service");
+/// let claims = Claims::new("user-42", 3600).issuer("my-service").with_random_jti();
 /// assert_eq!(claims.sub, "user-42");
 /// assert_eq!(claims.iss.as_deref(), Some("my-service"));
+/// assert!(claims.jti.is_some());
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
@@ -77,6 +79,13 @@ pub struct Claims {
     /// Issuer — the service that issued the token; omitted when `None`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub iss: Option<String>,
+
+    /// JWT ID — a unique identifier for this token, used for revocation.
+    ///
+    /// Set via [`Claims::with_jti`] or [`Claims::with_random_jti`].
+    /// Required for blocklist-based revocation to work.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jti: Option<String>,
 }
 
 impl Claims {
@@ -109,6 +118,7 @@ impl Claims {
             exp: now + expires_in_secs,
             iat: Some(now),
             iss: None,
+            jti: None,
         }
     }
 
@@ -125,6 +135,46 @@ impl Claims {
     #[must_use]
     pub fn issuer(mut self, iss: impl Into<String>) -> Self {
         self.iss = Some(iss.into());
+        self
+    }
+
+    /// Set a specific `jti` (JWT ID) for this token.
+    ///
+    /// The `jti` is used by [`crate::security::token::blocklist::TokenBlocklist`]
+    /// to identify and revoke individual tokens. It must be unique per token.
+    ///
+    /// Prefer [`Claims::with_random_jti`] unless you need a deterministic ID.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rttp::security::auth::Claims;
+    ///
+    /// let claims = Claims::new("user-1", 3600).with_jti("my-unique-id");
+    /// assert_eq!(claims.jti.as_deref(), Some("my-unique-id"));
+    /// ```
+    #[must_use]
+    pub fn with_jti(mut self, jti: impl Into<String>) -> Self {
+        self.jti = Some(jti.into());
+        self
+    }
+
+    /// Generate and set a random UUID v4 as the `jti` claim.
+    ///
+    /// This is the recommended way to populate `jti` — each call produces a
+    /// globally unique identifier, ensuring no two tokens share the same ID.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rttp::security::auth::Claims;
+    ///
+    /// let claims = Claims::new("user-1", 3600).with_random_jti();
+    /// assert!(claims.jti.is_some());
+    /// ```
+    #[must_use]
+    pub fn with_random_jti(mut self) -> Self {
+        self.jti = Some(uuid::Uuid::new_v4().to_string());
         self
     }
 }

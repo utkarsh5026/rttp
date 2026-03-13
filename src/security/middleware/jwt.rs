@@ -114,8 +114,6 @@ mod tests {
 
     use super::JwtMiddleware;
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
     fn make_auth() -> JwtAuth {
         JwtAuth::hs256(b"test-secret-for-jwt-middleware")
     }
@@ -134,8 +132,7 @@ mod tests {
     }
 
     fn context_with_auth_header(value: &str) -> Context {
-        let raw =
-            format!("GET / HTTP/1.1\r\nHost: localhost\r\nAuthorization: {value}\r\n\r\n");
+        let raw = format!("GET / HTTP/1.1\r\nHost: localhost\r\nAuthorization: {value}\r\n\r\n");
         parse_context(raw.as_bytes())
     }
 
@@ -149,7 +146,6 @@ mod tests {
         format!("Bearer {}", valid_token())
     }
 
-    /// Returns a `Next` whose sole handler responds with `200 OK` and body `"downstream"`.
     fn ok_next() -> Next {
         let handler: MiddlewareHandler = Arc::new(|_ctx, _next| {
             Box::pin(async move { Response::new(StatusCode::Ok).body("downstream") })
@@ -157,7 +153,6 @@ mod tests {
         Next::new(vec![handler])
     }
 
-    /// Returns a `Next` that reads `Claims` from extensions and echoes the `sub` as the body.
     fn claims_echo_next() -> Next {
         let handler: MiddlewareHandler = Arc::new(|ctx: Context, _next: Next| {
             Box::pin(async move {
@@ -175,15 +170,6 @@ mod tests {
     fn response_to_string(r: Response) -> String {
         String::from_utf8(r.into_bytes().to_vec()).unwrap()
     }
-
-    // ── Constructor ───────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_new_wraps_jwt_auth_without_panic() {
-        let _mw = JwtMiddleware::new(JwtAuth::hs256(b"any-secret"));
-    }
-
-    // ── Missing Authorization header ──────────────────────────────────────────
 
     #[tokio::test]
     async fn test_handle_missing_auth_header_returns_401() {
@@ -220,8 +206,6 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::Unauthorized);
     }
 
-    // ── Malformed / wrong-scheme Authorization header ─────────────────────────
-
     #[tokio::test]
     async fn test_handle_raw_token_without_bearer_prefix_returns_401() {
         let mw = make_middleware();
@@ -246,8 +230,6 @@ mod tests {
         let resp = mw.handle(ctx, Next::new(vec![])).await;
         assert_eq!(resp.status(), StatusCode::Unauthorized);
     }
-
-    // ── Invalid JWT ───────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn test_handle_garbage_token_returns_401() {
@@ -288,8 +270,13 @@ mod tests {
     #[tokio::test]
     async fn test_handle_expired_token_returns_401() {
         let auth = make_auth();
-        // exp = 1 → January 1 1970 00:00:01 UTC, long expired.
-        let expired = Claims { sub: "user".to_string(), exp: 1, iat: None, iss: None };
+        let expired = Claims {
+            sub: "user".to_string(),
+            exp: 1,
+            iat: None,
+            iss: None,
+            jti: None,
+        };
         let token = auth.sign(&expired).unwrap();
         let mw = make_middleware();
         let ctx = context_with_auth_header(&format!("Bearer {token}"));
@@ -299,15 +286,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_bearer_prefix_with_empty_token_returns_401() {
-        // "Bearer " with nothing after the space — strip_prefix succeeds but
-        // the resulting empty string is not a valid JWT.
         let mw = make_middleware();
         let ctx = context_with_auth_header("Bearer ");
         let resp = mw.handle(ctx, Next::new(vec![])).await;
         assert_eq!(resp.status(), StatusCode::Unauthorized);
     }
-
-    // ── Valid token — happy path ───────────────────────────────────────────────
 
     #[tokio::test]
     async fn test_handle_valid_token_calls_next_and_returns_200() {
