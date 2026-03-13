@@ -12,6 +12,100 @@ use crate::{
     middleware::{Middleware, Next},
 };
 
+/// A typed origin value for use with [`CorsMiddleware::allow_origin`].
+///
+/// Prefer this over raw strings to get IDE auto-complete and catch typos at compile time.
+///
+/// # Examples
+///
+/// ```rust
+/// use rttp::security::{CorsMiddleware, CorsOrigin};
+///
+/// let cors = CorsMiddleware::new()
+///     .allow_origin(CorsOrigin::Any)
+///     .allow_origin(CorsOrigin::Exact("https://app.example.com".to_string()));
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CorsOrigin {
+    /// Allow all origins (`*`).
+    Any,
+    /// Allow a single, exact origin (e.g. `"https://example.com"`).
+    Exact(String),
+}
+
+impl From<CorsOrigin> for String {
+    fn from(o: CorsOrigin) -> String {
+        match o {
+            CorsOrigin::Any => "*".to_owned(),
+            CorsOrigin::Exact(s) => s,
+        }
+    }
+}
+
+/// Common HTTP header names for use with [`CorsMiddleware::allow_header`] and
+/// [`CorsMiddleware::expose_header`].
+///
+/// Provides IDE auto-complete for the most frequently used CORS-relevant headers.
+/// For non-standard or uncommon headers pass a plain `&str` or `String` instead.
+///
+/// # Examples
+///
+/// ```rust
+/// use rttp::security::{CorsMiddleware, CorsHeader};
+///
+/// let cors = CorsMiddleware::new()
+///     .allow_header(CorsHeader::Authorization)
+///     .allow_header(CorsHeader::ContentType)
+///     .expose_header(CorsHeader::XRequestId);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CorsHeader {
+    /// `Authorization` — credentials for HTTP authentication.
+    Authorization,
+    /// `Content-Type` — media type of the request or response body.
+    ContentType,
+    /// `Accept` — media types the client is able to understand.
+    Accept,
+    /// `Accept-Language` — natural language preference.
+    AcceptLanguage,
+    /// `Accept-Encoding` — compression algorithms the client supports.
+    AcceptEncoding,
+    /// `X-Requested-With` — identifies XMLHttpRequest (legacy Ajax header).
+    XRequestedWith,
+    /// `X-Request-ID` — unique identifier propagated through the request chain.
+    XRequestId,
+    /// `X-Trace-ID` — distributed-tracing correlation ID.
+    XTraceId,
+    /// `Cache-Control` — directives for caching mechanisms.
+    CacheControl,
+    /// `Origin` — origin of the cross-site request.
+    Origin,
+}
+
+impl CorsHeader {
+    /// Returns the canonical header name string.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Authorization => "Authorization",
+            Self::ContentType => "Content-Type",
+            Self::Accept => "Accept",
+            Self::AcceptLanguage => "Accept-Language",
+            Self::AcceptEncoding => "Accept-Encoding",
+            Self::XRequestedWith => "X-Requested-With",
+            Self::XRequestId => "X-Request-ID",
+            Self::XTraceId => "X-Trace-ID",
+            Self::CacheControl => "Cache-Control",
+            Self::Origin => "Origin",
+        }
+    }
+}
+
+impl From<CorsHeader> for String {
+    fn from(h: CorsHeader) -> String {
+        h.as_str().to_owned()
+    }
+}
+
 /// CORS middleware — validates the `Origin` header, handles preflight requests,
 /// and injects `Access-Control-*` headers on actual responses.
 ///
@@ -479,8 +573,6 @@ mod tests {
         assert!(w.contains("Access-Control-Allow-Origin: *\r\n"));
     }
 
-    // ── Credentials ───────────────────────────────────────────────────────────
-
     #[tokio::test]
     async fn credentials_with_wildcard_reflects_origin_not_star() {
         let cors = CorsMiddleware::new().allow_credentials(true);
@@ -528,8 +620,6 @@ mod tests {
         assert!(w.contains("Access-Control-Allow-Credentials: true\r\n"));
     }
 
-    // ── Expose-Headers ────────────────────────────────────────────────────────
-
     #[tokio::test]
     async fn expose_header_appears_on_actual_response() {
         let cors = CorsMiddleware::new().expose_header("X-Request-ID");
@@ -551,12 +641,8 @@ mod tests {
         );
 
         let resp = cors.handle(ctx, ok_next()).await;
-        assert!(
-            wire(resp).contains("Access-Control-Expose-Headers: X-Request-ID, X-Trace-ID\r\n")
-        );
+        assert!(wire(resp).contains("Access-Control-Expose-Headers: X-Request-ID, X-Trace-ID\r\n"));
     }
-
-    // ── Allow-Methods / Allow-Headers on preflight ────────────────────────────
 
     #[tokio::test]
     async fn preflight_contains_custom_method() {
