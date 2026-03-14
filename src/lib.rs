@@ -20,20 +20,23 @@
 //! ```
 
 // ── Active modules with real implementations ──────────────────────────────────
+pub mod app;
+pub mod context;
+pub mod extract;
 pub mod http;
+pub mod middleware;
+pub mod router;
 pub mod server;
 
 // ── Planned modules — stubs for future implementation ────────────────────────
 pub mod background;
 pub mod cache;
-pub mod context;
 pub mod database;
 pub mod llm;
-pub mod middleware;
 pub mod realtime;
-pub mod router;
 pub mod security;
 
-// ── Convenience re-exports ────────────────────────────────────────────────────
+pub use app::App;
 pub use http::{Headers, Method, Request, Response, StatusCode};
+pub use router::Router;
 pub use server::{Server, ServerError};
