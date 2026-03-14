@@ -204,6 +204,39 @@ pub trait Middleware: Send + Sync {
 ///
 /// let handler = from_middleware(Arc::new(LoggerMiddleware));
 /// ```
+/// Wrap a [`HandlerFn`] with an ordered slice of middleware, producing a new
+/// [`HandlerFn`] that runs the middleware chain before the handler.
+///
+/// If `middlewares` is empty the original handler is returned unchanged.
+/// Middleware is executed in slice order (index 0 = outermost wrapper).
+///
+/// Used internally by [`App`](crate::app::App) for group middleware and by
+/// [`Router`](crate::router::Router) for per-route middleware.
+pub(crate) fn wrap_with_middlewares(
+    handler: crate::extract::HandlerFn,
+    middlewares: &[MiddlewareHandler],
+) -> crate::extract::HandlerFn {
+    use crate::Response;
+    use std::pin::Pin;
+    use std::sync::Arc;
+
+    if middlewares.is_empty() {
+        return handler;
+    }
+    let mut chain = middlewares.to_vec();
+    let terminal: MiddlewareHandler = Arc::new(move |ctx: Context, _next: Next| {
+        let h = Arc::clone(&handler);
+        Box::pin(async move { h(ctx).await }) as Pin<Box<dyn Future<Output = Response> + Send>>
+    });
+    chain.push(terminal);
+
+    Arc::new(move |ctx: Context| {
+        let chain = chain.clone();
+        Box::pin(async move { Next::new(chain).run(ctx).await })
+            as Pin<Box<dyn Future<Output = Response> + Send>>
+    })
+}
+
 pub struct LoggerMiddleware;
 
 impl Middleware for LoggerMiddleware {
