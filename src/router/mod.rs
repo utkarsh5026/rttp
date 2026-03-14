@@ -19,21 +19,14 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::context::{Context, PathParams};
+use crate::extract::HandlerFn;
+use crate::http::response::IntoResponse;
+use crate::middleware::{from_middleware, wrap_with_middlewares, Middleware, MiddlewareHandler};
 use crate::{Method, Request, Response, StatusCode};
-
-/// Type-erased, heap-allocated async handler that processes a [`Context`] and returns a
-/// [`Response`].
-///
-/// Handlers are stored behind `Arc<dyn Fn(…)>` so they can be cloned and shared across
-/// threads without copying the underlying closure. In practice you never construct this
-/// type directly — use [`Router::get`], [`Router::post`], and the other method-specific
-/// helpers instead.
-pub type Handler =
-    Arc<dyn Fn(Context) -> Pin<Box<dyn Future<Output = Response> + Send>> + Send + Sync + 'static>;
 
 /// Conversion trait for async handler functions.
 ///
-/// Any `Fn(Context) -> impl Future<Output = Response> + Send` that is also
+/// Any `Fn(Context) -> impl Future<Output = impl IntoResponse> + Send` that is also
 /// `Send + Sync + 'static` implements this trait automatically via the blanket impl
 /// below. Router methods accept `impl IntoHandler` so the two-type-parameter where-bound
 /// does not need to be repeated at every call site.
@@ -42,15 +35,77 @@ pub trait IntoHandler: Send + Sync + 'static {
     fn call(&self, ctx: Context) -> Pin<Box<dyn Future<Output = Response> + Send>>;
 }
 
-impl<T, F> IntoHandler for T
+impl<T, F, Res> IntoHandler for T
 where
     T: Fn(Context) -> F + Send + Sync + 'static,
-    F: Future<Output = Response> + Send + 'static,
+    F: Future<Output = Res> + Send + 'static,
+    Res: IntoResponse,
 {
     fn call(&self, ctx: Context) -> Pin<Box<dyn Future<Output = Response> + Send>> {
-        Box::pin((self)(ctx))
+        let fut = self(ctx);
+        Box::pin(async move { fut.await.into_response() })
     }
 }
+
+/// Converts a handler (optionally bundled with per-route middleware) into a
+/// type-erased [`HandlerFn`].
+///
+/// Implemented for:
+/// - Any bare [`IntoHandler`] — `handler`
+/// - Tuples `(M, H)`, `(M1, M2, H)`, … `(M1..M5, H)` where leading elements
+///   are [`Middleware`] and the final element is an [`IntoHandler`].
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use rttp::{Router, Response, StatusCode};
+/// use rttp::middleware::LoggerMiddleware;
+///
+/// let mut router = Router::new();
+///
+/// // bare handler — no per-route middleware
+/// router.get("/health", |_ctx| async { Response::new(StatusCode::Ok) });
+///
+/// // one middleware + handler
+/// router.get("/users", (LoggerMiddleware, |_ctx| async { Response::new(StatusCode::Ok) }));
+/// ```
+pub trait IntoRouteConfig: Send + Sync + 'static {
+    /// Build the final type-erased handler, wrapping with any bundled middleware.
+    fn into_route_fn(self) -> HandlerFn;
+}
+
+// Bare handler — delegates to the existing IntoHandler blanket impl.
+impl<T: IntoHandler> IntoRouteConfig for T {
+    fn into_route_fn(self) -> HandlerFn {
+        Arc::new(move |ctx| self.call(ctx))
+    }
+}
+
+// Macro: (M1, H), (M1, M2, H), … up to five middleware layers.
+macro_rules! impl_into_route_config {
+    ($($M:ident),+) => {
+        #[allow(non_snake_case)]
+        impl<$($M,)+ H> IntoRouteConfig for ($($M,)+ H)
+        where
+            $($M: Middleware + 'static,)+
+            H: IntoHandler,
+        {
+            fn into_route_fn(self) -> HandlerFn {
+                let ($($M,)+ h) = self;
+                let base: HandlerFn = Arc::new(move |ctx| h.call(ctx));
+                let middlewares: Vec<MiddlewareHandler> =
+                    vec![$(from_middleware(Arc::new($M)),)+];
+                wrap_with_middlewares(base, &middlewares)
+            }
+        }
+    };
+}
+
+impl_into_route_config!(M1);
+impl_into_route_config!(M1, M2);
+impl_into_route_config!(M1, M2, M3);
+impl_into_route_config!(M1, M2, M3, M4);
+impl_into_route_config!(M1, M2, M3, M4, M5);
 
 // A single path segment, either a literal string or a named capture (`:name`).
 #[derive(Debug, Clone)]
@@ -77,7 +132,7 @@ impl Pattern {
     ///
     /// 1. Ends with `/*` → [`Pattern::Wildcard`] — matches any path sharing the prefix.
     /// 2. Contains `:` → [`Pattern::Parameterized`] — one or more named captures.
-    /// 3. Otherwise → [`Pattern::Exact`] — literal path match.
+    /// 3. Otherwise, → [`Pattern::Exact`] — literal path match.
     ///
     /// A trailing slash (other than on the root `/`) is stripped before classification so
     /// that `/users/` and `/users` compile to identical patterns.
@@ -92,7 +147,7 @@ impl Pattern {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// # use rttp::router::Pattern; // illustrative — Pattern is crate-private
     /// let p = Pattern::parse("/users/:id");
     /// // p is Pattern::Parameterized with segments ["users", ":id"]
@@ -183,11 +238,11 @@ impl Pattern {
 struct Route {
     method: Method,
     pattern: Pattern,
-    handler: Handler,
+    handler: HandlerFn,
 }
 
 impl Route {
-    fn new(method: Method, pattern: &str, handler: Handler) -> Self {
+    fn new(method: Method, pattern: &str, handler: HandlerFn) -> Self {
         Self {
             method,
             pattern: Pattern::parse(pattern),
@@ -220,7 +275,7 @@ impl Route {
 ///
 /// router.get("/ping", |_ctx| async { Response::new(StatusCode::Ok) });
 ///
-/// router.get("/users/:id", |ctx| async move {
+/// router.get("/users/:id", |ctx: rttp::context::Context| async move {
 ///     let id = ctx.params().get("id").unwrap_or("unknown").to_owned();
 ///     Response::new(StatusCode::Ok).body(id)
 /// });
@@ -265,8 +320,9 @@ impl Router {
     /// let mut router = Router::new();
     /// router.get("/hello", |_ctx| async { Response::new(StatusCode::Ok) });
     /// ```
-    pub fn get(&mut self, path: &str, handler: impl IntoHandler) {
-        self.add_route(Method::Get, path, handler);
+    pub fn get(&mut self, path: &str, handler: impl IntoRouteConfig) {
+        self.routes
+            .push(Route::new(Method::Get, path, handler.into_route_fn()));
     }
 
     /// Register a handler for `POST` requests matching `path`.
@@ -274,7 +330,7 @@ impl Router {
     /// # Arguments
     ///
     /// - `path` — URL pattern string (e.g. `"/users"`, `"/users/:id"`, or `"/files/*"`).
-    /// - `handler` — Async function that receives a [`Context`] and returns a [`Response`].
+    /// - `handler` — Handler or `(middleware, …, handler)` tuple.
     ///
     /// # Examples
     ///
@@ -284,8 +340,9 @@ impl Router {
     /// let mut router = Router::new();
     /// router.post("/users", |_ctx| async { Response::new(StatusCode::Created) });
     /// ```
-    pub fn post(&mut self, path: &str, handler: impl IntoHandler) {
-        self.add_route(Method::Post, path, handler);
+    pub fn post(&mut self, path: &str, handler: impl IntoRouteConfig) {
+        self.routes
+            .push(Route::new(Method::Post, path, handler.into_route_fn()));
     }
 
     /// Register a handler for `PUT` requests matching `path`.
@@ -293,7 +350,7 @@ impl Router {
     /// # Arguments
     ///
     /// - `path` — URL pattern string (e.g. `"/users/:id"`).
-    /// - `handler` — Async function that receives a [`Context`] and returns a [`Response`].
+    /// - `handler` — Handler or `(middleware, …, handler)` tuple.
     ///
     /// # Examples
     ///
@@ -303,8 +360,9 @@ impl Router {
     /// let mut router = Router::new();
     /// router.put("/users/:id", |_ctx| async { Response::new(StatusCode::Ok) });
     /// ```
-    pub fn put(&mut self, path: &str, handler: impl IntoHandler) {
-        self.add_route(Method::Put, path, handler);
+    pub fn put(&mut self, path: &str, handler: impl IntoRouteConfig) {
+        self.routes
+            .push(Route::new(Method::Put, path, handler.into_route_fn()));
     }
 
     /// Register a handler for `DELETE` requests matching `path`.
@@ -312,7 +370,7 @@ impl Router {
     /// # Arguments
     ///
     /// - `path` — URL pattern string (e.g. `"/users/:id"`).
-    /// - `handler` — Async function that receives a [`Context`] and returns a [`Response`].
+    /// - `handler` — Handler or `(middleware, …, handler)` tuple.
     ///
     /// # Examples
     ///
@@ -322,8 +380,9 @@ impl Router {
     /// let mut router = Router::new();
     /// router.delete("/users/:id", |_ctx| async { Response::new(StatusCode::Ok) });
     /// ```
-    pub fn delete(&mut self, path: &str, handler: impl IntoHandler) {
-        self.add_route(Method::Delete, path, handler);
+    pub fn delete(&mut self, path: &str, handler: impl IntoRouteConfig) {
+        self.routes
+            .push(Route::new(Method::Delete, path, handler.into_route_fn()));
     }
 
     /// Register a handler for `OPTIONS` requests matching `path`.
@@ -331,7 +390,7 @@ impl Router {
     /// # Arguments
     ///
     /// - `path` — URL pattern string.
-    /// - `handler` — Async function that receives a [`Context`] and returns a [`Response`].
+    /// - `handler` — Handler or `(middleware, …, handler)` tuple.
     ///
     /// # Examples
     ///
@@ -341,8 +400,9 @@ impl Router {
     /// let mut router = Router::new();
     /// router.options("/users", |_ctx| async { Response::new(StatusCode::Ok) });
     /// ```
-    pub fn options(&mut self, path: &str, handler: impl IntoHandler) {
-        self.add_route(Method::Options, path, handler);
+    pub fn options(&mut self, path: &str, handler: impl IntoRouteConfig) {
+        self.routes
+            .push(Route::new(Method::Options, path, handler.into_route_fn()));
     }
 
     /// Register a handler for `PATCH` requests matching `path`.
@@ -350,7 +410,7 @@ impl Router {
     /// # Arguments
     ///
     /// - `path` — URL pattern string (e.g. `"/users/:id"`).
-    /// - `handler` — Async function that receives a [`Context`] and returns a [`Response`].
+    /// - `handler` — Handler or `(middleware, …, handler)` tuple.
     ///
     /// # Examples
     ///
@@ -360,14 +420,46 @@ impl Router {
     /// let mut router = Router::new();
     /// router.patch("/users/:id", |_ctx| async { Response::new(StatusCode::Ok) });
     /// ```
-    pub fn patch(&mut self, path: &str, handler: impl IntoHandler) {
-        self.add_route(Method::Patch, path, handler);
+    pub fn patch(&mut self, path: &str, handler: impl IntoRouteConfig) {
+        self.routes
+            .push(Route::new(Method::Patch, path, handler.into_route_fn()));
     }
 
-    // Erase the concrete handler type and store it as a `Handler` trait object.
-    fn add_route(&mut self, method: Method, path: &str, handler: impl IntoHandler) {
-        let handler: Handler = Arc::new(move |ctx| handler.call(ctx));
+    /// Register a route with a pre-built [`HandlerFn`].
+    ///
+    /// This is used internally by [`App`](crate::app::App) to register
+    /// extractor-based handlers that have already been converted.
+    pub(crate) fn add_raw_route(&mut self, method: Method, path: &str, handler: HandlerFn) {
         self.routes.push(Route::new(method, path, handler));
+    }
+
+    /// Merge all routes from `other` into this router.
+    ///
+    /// Routes from `other` are appended after this router's existing routes,
+    /// so existing routes retain priority on conflict. Paths are taken as-is —
+    /// no prefix transformation is applied.
+    ///
+    /// This is the primary mechanism for splitting route definitions across
+    /// modules and composing them at startup.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use rttp::{Router, Response, StatusCode};
+    ///
+    /// fn user_routes() -> Router {
+    ///     let mut r = Router::new();
+    ///     r.get("/users", |_ctx| async { Response::new(StatusCode::Ok) });
+    ///     r
+    /// }
+    ///
+    /// let mut router = Router::new();
+    /// router.get("/health", |_ctx| async { Response::new(StatusCode::Ok) });
+    /// router.merge(user_routes());
+    /// // router now has: GET /health, GET /users
+    /// ```
+    pub fn merge(&mut self, other: Router) {
+        self.routes.extend(other.routes);
     }
 
     /// Return the number of routes registered in this router.
@@ -432,6 +524,27 @@ impl Router {
         for route in &self.routes {
             if let Some(params) = route.matches(request.method(), path) {
                 let ctx = Context::with_params(request, params);
+                return (route.handler)(ctx).await;
+            }
+        }
+
+        Response::new(StatusCode::NotFound)
+    }
+
+    /// Dispatch a pre-built [`Context`] to the first matching route.
+    ///
+    /// Unlike [`route`](Self::route), this method receives an existing `Context`
+    /// (with extensions already populated by middleware) and merges in the
+    /// extracted path parameters before calling the handler.
+    ///
+    /// Returns `404 Not Found` when no route matches.
+    pub async fn dispatch(&self, mut ctx: Context) -> Response {
+        let path = ctx.request().path().to_owned();
+        let method = ctx.request().method().clone();
+
+        for route in &self.routes {
+            if let Some(params) = route.matches(&method, &path) {
+                *ctx.params_mut() = params;
                 return (route.handler)(ctx).await;
             }
         }
