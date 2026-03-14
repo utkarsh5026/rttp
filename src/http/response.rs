@@ -377,6 +377,31 @@ impl Response {
         Response::new(status)
     }
 
+    /// Append a `Set-Cookie` header built from a [`Cookie`](super::cookie::Cookie).
+    ///
+    /// Multiple cookies can be set by calling this method repeatedly. Each call
+    /// appends a new `Set-Cookie` header entry without removing existing ones.
+    ///
+    /// # Arguments
+    ///
+    /// - `cookie` — a fully configured [`Cookie`](super::cookie::Cookie) value.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rttp::http::{Response, StatusCode};
+    /// use rttp::http::cookie::Cookie;
+    ///
+    /// let response = Response::new(StatusCode::Ok)
+    ///     .cookie(Cookie::new("session", "abc123").http_only(true).secure(true))
+    ///     .cookie(Cookie::new("theme", "dark").path("/"));
+    /// ```
+    #[must_use]
+    pub fn cookie(mut self, cookie: super::cookie::Cookie) -> Self {
+        self.headers.append("Set-Cookie", cookie.to_string());
+        self
+    }
+
     /// Returns a shared reference to the response headers.
     ///
     /// Useful for inspecting headers set by upstream middleware or handlers

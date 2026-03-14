@@ -8,6 +8,8 @@
 
 use std::fmt;
 
+use super::cookie::{Cookie, CookieJar};
+
 /// A case-insensitive, multi-value HTTP header map.
 ///
 /// Preserves insertion order and allows multiple values per header name,
@@ -302,6 +304,57 @@ impl Headers {
     /// ```
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
+    }
+
+    /// Parse the `Cookie` request header into a [`CookieJar`].
+    ///
+    /// If no `Cookie` header is present the returned jar is empty.
+    /// If multiple `Cookie` headers are present (unusual but valid), all of
+    /// them are concatenated before parsing.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rttp::http::Headers;
+    ///
+    /// let mut headers = Headers::new();
+    /// headers.insert("Cookie", "session=abc; theme=dark");
+    ///
+    /// let jar = headers.cookies();
+    /// assert_eq!(jar.get("session"), Some("abc"));
+    /// assert_eq!(jar.get("theme"), Some("dark"));
+    /// ```
+    pub fn cookies(&self) -> CookieJar {
+        let combined = self
+            .get_all("cookie")
+            .collect::<Vec<_>>()
+            .join("; ");
+        CookieJar::parse(&combined)
+    }
+
+    /// Append a `Set-Cookie` response header from a [`Cookie`] value.
+    ///
+    /// Equivalent to calling `headers.append("Set-Cookie", cookie.to_string())`,
+    /// but avoids the manual serialization step.
+    ///
+    /// # Arguments
+    ///
+    /// - `cookie` — a configured [`Cookie`] to serialize and append.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rttp::http::Headers;
+    /// use rttp::http::cookie::Cookie;
+    ///
+    /// let mut headers = Headers::new();
+    /// headers.set_cookie(Cookie::new("session", "abc").http_only(true));
+    /// headers.set_cookie(Cookie::new("theme", "dark"));
+    ///
+    /// assert_eq!(headers.len(), 2);
+    /// ```
+    pub fn set_cookie(&mut self, cookie: Cookie) {
+        self.append("Set-Cookie", cookie.to_string());
     }
 
     /// Returns an iterator over all `(name, value)` pairs in insertion order.
