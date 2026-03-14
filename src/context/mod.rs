@@ -114,6 +114,26 @@ impl PathParams {
     pub fn remove(&mut self, key: &str) -> Option<String> {
         self.map.remove(key)
     }
+
+    /// Returns an iterator over all path parameters as `(key, value)` pairs.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.map.iter().map(|(k, v)| (k.as_str(), v.as_str()))
+    }
+
+    /// Returns an iterator over path parameter values.
+    pub fn values(&self) -> impl Iterator<Item = &str> {
+        self.map.values().map(String::as_str)
+    }
+
+    /// Returns the number of path parameters.
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    /// Returns `true` if there are no path parameters.
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
 }
 
 /// Per-request context — bundles the [`Request`] with [`PathParams`] and [`Extensions`].
@@ -149,6 +169,11 @@ impl Context {
     /// Returns a shared reference to the underlying request.
     pub fn request(&self) -> &Request {
         &self.request
+    }
+
+    /// Returns a mutable reference to the underlying request.
+    pub fn request_mut(&mut self) -> &mut Request {
+        &mut self.request
     }
 
     /// Returns a shared reference to the path parameters.
