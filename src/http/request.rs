@@ -1,106 +1,33 @@
 //! HTTP/1.1 request parsing using the [`httparse`] crate.
+//!
+//! This module exposes [`Request`], a fully parsed representation of an incoming HTTP/1.1
+//! request, along with [`RequestError`] for parse failures. Parsing is zero-copy where
+//! possible: headers are validated in-place by `httparse` and the body is captured as a
+//! [`bytes::Bytes`] slice of the original buffer.
 
 use std::collections::HashMap;
-use std::fmt;
-use std::str;
 
 use bytes::Bytes;
 use thiserror::Error;
 
 use super::{Headers, Method};
 
-/// HTTP parsing errors
-#[derive(Debug)]
-pub enum ParseError {
-    /// Invalid HTTP request line
-    InvalidRequestLine,
-
-    /// Invalid HTTP method
-    InvalidMethod,
-
-    /// Invalid HTTP version
-    InvalidVersion,
-
-    /// Invalid HTTP header
-    InvalidHeader,
-
-    /// Invalid HTTP body
-    InvalidBody,
-
-    /// Incomplete HTTP request
-    IncompleteRequest,
-
-    /// UTF-8 error
-    Utf8Error(std::str::Utf8Error),
-
-    /// IO error
-    IoError(std::io::Error),
-}
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ParseError::InvalidRequestLine => write!(f, "Invalid HTTP request line"),
-            ParseError::InvalidMethod => write!(f, "Invalid HTTP method"),
-            ParseError::InvalidVersion => write!(f, "Invalid HTTP version"),
-            ParseError::InvalidHeader => write!(f, "Invalid HTTP header"),
-            ParseError::InvalidBody => write!(f, "Invalid HTTP body"),
-            ParseError::IncompleteRequest => write!(f, "Incomplete HTTP request"),
-            ParseError::Utf8Error(e) => write!(f, "UTF-8 error: {}", e),
-            ParseError::IoError(e) => write!(f, "IO error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for ParseError {}
-
-impl From<str::Utf8Error> for ParseError {
-    fn from(err: str::Utf8Error) -> Self {
-        ParseError::Utf8Error(err)
-    }
-}
-
-impl From<std::io::Error> for ParseError {
-    fn from(err: std::io::Error) -> Self {
-        ParseError::IoError(err)
-    }
-}
-
-pub type ParseResult<T> = Result<T, ParseError>;
-
-/// HTTP version
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Version {
-    Http10,
-    Http11,
-}
-
-impl Version {}
-
-impl std::str::FromStr for Version {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> ParseResult<Self> {
-        match s {
-            "HTTP/1.0" => Ok(Version::Http10),
-            "HTTP/1.1" => Ok(Version::Http11),
-            _ => Err(ParseError::InvalidVersion),
-        }
-    }
-}
-
 /// Errors that can occur while parsing an HTTP/1.1 request.
 #[derive(Debug, Error)]
 pub enum RequestError {
+    /// The buffer ends before the header terminator (`\r\n\r\n`); more data is needed.
     #[error("request is incomplete — more data needed")]
     Incomplete,
 
+    /// The data is structurally malformed and cannot be parsed by `httparse`.
     #[error("HTTP parse error: {0}")]
     Parse(#[from] httparse::Error),
 
+    /// A required HTTP field (method, path, or version) was absent from the request.
     #[error("missing required field: {field}")]
     MissingField { field: &'static str },
 
+    /// The declared `Content-Length` exceeds the configured body size limit.
     #[error("request body exceeds maximum allowed size of {max_bytes} bytes")]
     BodyTooLarge { max_bytes: usize },
 }
@@ -162,7 +89,7 @@ impl Request {
             .method
             .ok_or(RequestError::MissingField { field: "method" })?
             .parse()
-            .unwrap(); // Infallible
+            .unwrap();
 
         let raw_path = raw_req
             .path
@@ -188,7 +115,13 @@ impl Request {
         }
 
         let params = query.as_deref().map(parse_query_string).unwrap_or_default();
-        let body = Bytes::copy_from_slice(&buf[body_offset..]);
+
+        let content_length = header_map
+            .get("content-length")
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0);
+        let body_end = body_offset + content_length;
+        let body = Bytes::copy_from_slice(&buf[body_offset..body_end.min(buf.len())]);
 
         Ok((
             Self {
@@ -224,14 +157,62 @@ impl Request {
         &self.headers
     }
 
+    /// Returns a mutable reference to the request headers.
+    pub fn headers_mut(&mut self) -> &mut Headers {
+        &mut self.headers
+    }
+
+    /// Replaces the request path.
+    ///
+    /// # Arguments
+    ///
+    /// - `path` — the new path string; typically set by router middleware after stripping a prefix.
+    pub fn set_path(&mut self, path: impl Into<String>) {
+        self.path = path.into();
+    }
+
     /// Returns the raw query string (without the leading `?`), if any.
     pub fn query_string(&self) -> Option<&str> {
         self.query.as_deref()
     }
 
     /// Returns a parsed query parameter value by key.
+    ///
+    /// # Arguments
+    ///
+    /// - `key` — the query parameter name (case-sensitive, `+`-decoded).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rttp::http::request::Request;
+    ///
+    /// let raw = b"GET /search?q=rust+lang HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    /// let (req, _) = Request::parse(raw).unwrap();
+    /// assert_eq!(req.query_param("q"), Some("rust lang"));
+    /// assert_eq!(req.query_param("missing"), None);
+    /// ```
     pub fn query_param(&self, key: &str) -> Option<&str> {
         self.params.get(key).map(String::as_str)
+    }
+
+    /// Returns an iterator over all parsed query parameters as `(key, value)` pairs.
+    ///
+    /// The iteration order is unspecified (backed by a `HashMap`).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rttp::http::request::Request;
+    ///
+    /// let raw = b"GET /?a=1&b=2 HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    /// let (req, _) = Request::parse(raw).unwrap();
+    /// let mut pairs: Vec<_> = req.query_params().collect();
+    /// pairs.sort();
+    /// assert_eq!(pairs, vec![("a", "1"), ("b", "2")]);
+    /// ```
+    pub fn query_params(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.params.iter().map(|(k, v)| (k.as_str(), v.as_str()))
     }
 
     /// Returns the request body bytes.
