@@ -4,7 +4,7 @@
 //! 1. `X-Forwarded-For` — rightmost untrusted entry, controlled by
 //!    [`trusted_proxy_depth`](IpFilterMiddleware::trusted_proxy_depth).
 //! 2. `X-Real-IP` header.
-//! 3. A [`std::net::SocketAddr`] stored in `ctx.extensions()` by the server.
+//! 3. A [`SocketAddr`] stored in `ctx.extensions()` by the server.
 //!
 //! Both exact IPs and CIDR blocks (`192.168.1.0/24`, `::1/128`) are supported
 //! for IPv4 and IPv6 addresses.
@@ -32,9 +32,9 @@ use std::{
 };
 
 use crate::{
-    Response, StatusCode,
-    context::Context,
-    middleware::{Middleware, Next},
+    context::Context, middleware::{Middleware, Next},
+    Response,
+    StatusCode,
 };
 
 /// A parsed CIDR network range (IPv4 or IPv6).
@@ -105,8 +105,6 @@ impl Cidr {
         }
     }
 }
-
-// ── Filter mode ───────────────────────────────────────────────────────────────
 
 /// Controls whether the CIDR list is used as an allowlist or a blocklist.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -262,32 +260,15 @@ impl Middleware for IpFilterMiddleware {
 mod tests {
     use super::*;
     use crate::{
-        Response, StatusCode,
         context::Context,
-        middleware::{MiddlewareHandler, Next},
+        security::middleware::test_helpers::{make_context, ok_next},
     };
-    use std::sync::Arc;
-
-    fn make_context(raw: &[u8]) -> Context {
-        let (req, _) = crate::Request::parse(raw).unwrap();
-        Context::new(req)
-    }
 
     fn make_context_with_peer(raw: &[u8], peer: SocketAddr) -> Context {
-        let (req, _) = crate::Request::parse(raw).unwrap();
-        let mut ctx = Context::new(req);
+        let mut ctx = make_context(raw);
         ctx.extensions_mut().insert(peer);
         ctx
     }
-
-    fn ok_next() -> Next {
-        let handler: MiddlewareHandler = Arc::new(|_ctx: Context, _next: Next| {
-            Box::pin(async { Response::new(StatusCode::Ok) })
-        });
-        Next::new(vec![handler])
-    }
-
-    // ── Cidr::parse ───────────────────────────────────────────────────────────
 
     #[test]
     fn cidr_parse_ipv4_with_prefix() {
@@ -324,8 +305,6 @@ mod tests {
         assert!(Cidr::parse("192.168.0.0/33").is_err());
     }
 
-    // ── Allowlist ─────────────────────────────────────────────────────────────
-
     #[tokio::test]
     async fn allowlist_permits_matching_ip_via_xff() {
         let filter = IpFilterMiddleware::allowlist().add_cidr("10.0.0.0/8");
@@ -351,8 +330,6 @@ mod tests {
         let resp = filter.handle(ctx, ok_next()).await;
         assert_eq!(resp.status(), StatusCode::Forbidden);
     }
-
-    // ── Blocklist ─────────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn blocklist_blocks_matching_ip() {
@@ -382,8 +359,6 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::Ok);
     }
 
-    // ── Block status ──────────────────────────────────────────────────────────
-
     #[tokio::test]
     async fn not_found_on_block_returns_404() {
         let filter = IpFilterMiddleware::allowlist()
@@ -395,12 +370,8 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::NotFound);
     }
 
-    // ── IP resolution priority ────────────────────────────────────────────────
-
     #[tokio::test]
     async fn xff_takes_priority_over_x_real_ip() {
-        // XFF says 10.x (allowed), X-Real-IP says 1.x (not allowed).
-        // If XFF wins, the request should pass.
         let filter = IpFilterMiddleware::allowlist().add_cidr("10.0.0.0/8");
         let ctx = make_context(
             b"GET / HTTP/1.1\r\nHost: localhost\r\n\
@@ -427,12 +398,8 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::Ok);
     }
 
-    // ── Trusted proxy depth ───────────────────────────────────────────────────
-
     #[tokio::test]
     async fn trusted_proxy_depth_skips_rightmost_entries() {
-        // XFF: "1.2.3.4, 10.0.0.1" — last entry is our trusted proxy.
-        // With depth=1 the effective client IP is 1.2.3.4 (not allowed).
         let filter = IpFilterMiddleware::allowlist()
             .add_cidr("10.0.0.0/8")
             .trusted_proxy_depth(1);
@@ -457,8 +424,6 @@ mod tests {
         let resp = filter.handle(ctx, ok_next()).await;
         assert_eq!(resp.status(), StatusCode::Ok);
     }
-
-    // ── Multiple CIDRs ────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn multiple_cidrs_any_match_is_sufficient() {
