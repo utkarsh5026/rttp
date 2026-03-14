@@ -41,25 +41,32 @@ use crate::{
     security::auth::api_key::ApiKeyStore,
 };
 
-/// API key authentication middleware.
+/// Middleware that authenticates requests using an API key.
 ///
-/// See the [module documentation](self) for header priority, response codes,
-/// and usage examples.
+/// Wraps any [`ApiKeyStore`] implementation and guards the downstream handler
+/// chain. On success the resolved [`ApiKeyIdentity`] is inserted into the
+/// request [`Context`] extensions so downstream handlers can read it.
 pub struct ApiKeyMiddleware<S: ApiKeyStore> {
     store: Arc<S>,
 }
 
 impl<S: ApiKeyStore + 'static> ApiKeyMiddleware<S> {
-    /// Wrap an [`ApiKeyStore`] in the middleware.
+    /// Create a new `ApiKeyMiddleware` backed by the given store.
+    ///
+    /// # Arguments
+    ///
+    /// - `store` — any value that implements [`ApiKeyStore`]. It is wrapped in
+    ///   an [`Arc`] internally so the middleware can be shared across threads.
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```rust,no_run
     /// use rttp::security::auth::api_key::{ApiKeyIdentity, InMemoryApiKeyStore};
     /// use rttp::security::middleware::api_key::ApiKeyMiddleware;
     ///
     /// let store = InMemoryApiKeyStore::new()
-    ///     .add_key("my-key", ApiKeyIdentity::new("client"));
+    ///     .add_key("sk-prod-abc", ApiKeyIdentity::new("service-a").scope("read"));
+    ///
     /// let _mw = ApiKeyMiddleware::new(store);
     /// ```
     pub fn new(store: S) -> Self {
@@ -70,17 +77,12 @@ impl<S: ApiKeyStore + 'static> ApiKeyMiddleware<S> {
 }
 
 impl<S: ApiKeyStore + 'static> Middleware for ApiKeyMiddleware<S> {
-    /// Authenticate the request via an API key header.
+    /// Authenticate the request and delegate to `next` on success.
     ///
-    /// # Behavior
-    ///
-    /// 1. Reads `X-Api-Key`; if absent, tries `Authorization: ApiKey <key>`.
-    /// 2. If neither header is present, returns `401 Unauthorized` with a
-    ///    `WWW-Authenticate: ApiKey` challenge header.
-    /// 3. Passes the extracted key to [`ApiKeyStore::lookup`].
-    /// 4. If the key is unknown or expired, returns `403 Forbidden`.
-    /// 5. On success, injects the [`ApiKeyIdentity`] into `ctx.extensions` and
-    ///    delegates to the next middleware.
+    /// Returns `401 Unauthorized` when no API key header is present, and
+    /// `403 Forbidden` when the key is unknown or expired. On a valid key the
+    /// resolved [`ApiKeyIdentity`] is inserted into `ctx` extensions before
+    /// calling `next`.
     fn handle(&self, ctx: Context, next: Next) -> Pin<Box<dyn Future<Output = Response> + Send>> {
         let store = Arc::clone(&self.store);
 
@@ -120,14 +122,12 @@ mod tests {
     use crate::{
         Response, StatusCode,
         context::Context,
-        http::request::Request,
         middleware::{Middleware, MiddlewareHandler, Next},
         security::auth::api_key::{ApiKeyIdentity, InMemoryApiKeyStore},
+        security::middleware::test_helpers::{make_context, ok_next, response_to_string},
     };
 
     use super::ApiKeyMiddleware;
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
 
     fn make_store() -> InMemoryApiKeyStore {
         InMemoryApiKeyStore::new()
@@ -139,31 +139,18 @@ mod tests {
         ApiKeyMiddleware::new(make_store())
     }
 
-    fn parse_context(raw: &[u8]) -> Context {
-        let (req, _) = Request::parse(raw).unwrap();
-        Context::new(req)
-    }
-
     fn context_without_key() -> Context {
-        parse_context(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        make_context(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
     }
 
     fn context_with_x_api_key(key: &str) -> Context {
         let raw = format!("GET / HTTP/1.1\r\nHost: localhost\r\nX-Api-Key: {key}\r\n\r\n");
-        parse_context(raw.as_bytes())
+        make_context(raw.as_bytes())
     }
 
     fn context_with_authorization(value: &str) -> Context {
         let raw = format!("GET / HTTP/1.1\r\nHost: localhost\r\nAuthorization: {value}\r\n\r\n");
-        parse_context(raw.as_bytes())
-    }
-
-    /// A `Next` that always responds `200 OK` with body `"downstream"`.
-    fn ok_next() -> Next {
-        let handler: MiddlewareHandler = Arc::new(|_ctx: Context, _next: Next| {
-            Box::pin(async move { Response::new(StatusCode::Ok).body("downstream") })
-        });
-        Next::new(vec![handler])
+        make_context(raw.as_bytes())
     }
 
     /// A `Next` that reads the injected [`ApiKeyIdentity`] and echoes `name`.
@@ -182,7 +169,7 @@ mod tests {
     }
 
     fn wire(r: Response) -> String {
-        String::from_utf8(r.into_bytes().to_vec()).unwrap()
+        response_to_string(r)
     }
 
     // ── Constructor ───────────────────────────────────────────────────────────
@@ -328,8 +315,6 @@ mod tests {
         assert!(wire(resp).ends_with("admin"));
     }
 
-    // ── X-Api-Key priority over Authorization ─────────────────────────────────
-
     #[tokio::test]
     async fn x_api_key_takes_priority_over_authorization_header() {
         // X-Api-Key = valid-key (service-a), Authorization = admin-key (admin).
@@ -337,7 +322,7 @@ mod tests {
         let raw = b"GET / HTTP/1.1\r\nHost: localhost\r\n\
                     X-Api-Key: valid-key\r\n\
                     Authorization: ApiKey admin-key\r\n\r\n";
-        let ctx = parse_context(raw);
+        let ctx = make_context(raw);
         let resp = make_middleware().handle(ctx, identity_echo_next()).await;
         assert!(wire(resp).ends_with("service-a"));
     }
