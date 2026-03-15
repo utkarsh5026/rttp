@@ -12,7 +12,7 @@
 //! # Examples
 //!
 //! ```rust,no_run
-//! use rttp::security::IpFilterMiddleware;
+//! use rttp::security::middleware::IpFilterMiddleware;
 //!
 //! // Allowlist — only these ranges may proceed.
 //! let filter = IpFilterMiddleware::allowlist()

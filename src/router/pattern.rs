@@ -61,8 +61,8 @@ impl Pattern {
     ///
     /// # Examples
     ///
-    /// ```rust
-    /// use rttp::router::pattern::Pattern; // illustrative — adjust path as needed
+    /// ```rust,ignore
+    /// use rttp::router::pattern::Pattern; // pub(super) — not accessible from outside the module
     ///
     /// let exact = Pattern::parse("/users");
     /// let param = Pattern::parse("/users/:id");
@@ -113,7 +113,7 @@ impl Pattern {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```rust,ignore
     /// let pat = Pattern::parse("/users/:id");
     /// let params = pat.matches("/users/42").unwrap();
     /// assert_eq!(params.get("id"), Some("42"));

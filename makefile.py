@@ -87,6 +87,7 @@ _TARGET_CATEGORY = {
     "fmt-check":  "🧪  Test & Quality",
     "lint":       "🧪  Test & Quality",
     "test":       "🧪  Test & Quality",
+    "doctest":    "🧪  Test & Quality",
     "coverage":   "🧪  Test & Quality",
     "doc":        "📖  Docs",
     "doc-build":  "📖  Docs",
@@ -191,6 +192,13 @@ def cmd_test():
     _success("Tests passed.")
 
 
+@target("doctest", "Run all documentation tests")
+def cmd_doctest():
+    _header("Running doctests")
+    run(CARGO, "test", "--doc", "--all-features")
+    _success("Doctests passed.")
+
+
 @target("coverage", "Generate HTML coverage report and open it (requires cargo-llvm-cov)")
 def cmd_coverage():
     _header("Generating coverage report")
@@ -266,6 +274,7 @@ def cmd_ci():
     cmd_check()
     cmd_lint()
     cmd_test()
+    cmd_doctest()
     cmd_audit()
     cmd_deny()
     _success("CI pipeline passed.")

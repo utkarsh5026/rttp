@@ -167,7 +167,7 @@ pub trait SessionStore: Send + Sync {
 /// use std::{sync::Arc, time::Duration};
 /// use rttp::security::auth::session::{InMemorySessionStore, Session, SessionStore};
 ///
-/// # tokio_test::block_on(async {
+/// # tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
 /// let store = Arc::new(InMemorySessionStore::new());
 /// let session = Session::new(Some(Duration::from_secs(3600)));
 /// let id = session.id;
