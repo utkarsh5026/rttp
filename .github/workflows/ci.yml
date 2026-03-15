@@ -21,28 +21,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --all-targets --all-features
 
-  # ── Tests ────────────────────────────────────────────────────────────────────
-  test:
-    name: Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --all-targets --all-features
-
-  # ── Clippy (linting) — warnings are errors ───────────────────────────────────
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-targets --all-features -- -D warnings
-
   # ── Rustfmt — formatting check ───────────────────────────────────────────────
   fmt:
     name: Rustfmt
@@ -54,6 +32,31 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
+  # ── Tests ────────────────────────────────────────────────────────────────────
+  test:
+    name: Tests
+    needs: [check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-nextest
+      - run: cargo nextest run --all-targets --all-features
+
+  # ── Clippy (linting) — warnings are errors ───────────────────────────────────
+  clippy:
+    name: Clippy
+    needs: [check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
   # ── Security audit ───────────────────────────────────────────────────────────
   audit:
     name: Security Audit
@@ -64,9 +67,19 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+  # ── Dependency lint — licenses, bans, advisories ────────────────────────────
+  deny:
+    name: Cargo Deny
+    needs: [check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
   # ── MSRV — ensure crate builds on the declared minimum Rust version ──────────
   msrv:
     name: MSRV (1.85)
+    needs: [check]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -77,9 +90,11 @@ jobs:
   # ── Windows smoke test ───────────────────────────────────────────────────────
   test-windows:
     name: Tests (Windows)
+    needs: [check]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --all-targets
+      - uses: taiki-e/install-action@cargo-nextest
+      - run: cargo nextest run --all-targets

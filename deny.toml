@@ -1,0 +1,56 @@
+# cargo-deny configuration for rttp
+# Docs: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# Only check dependencies for the default target triple
+targets = []
+
+# ── Advisories ───────────────────────────────────────────────────────────────
+# Check for security vulnerabilities reported in the RustSec advisory database.
+[advisories]
+version = 2
+# Ignore advisories only when there is no fix yet and CI would otherwise break.
+ignore = []
+
+# ── Licenses ─────────────────────────────────────────────────────────────────
+[licenses]
+version = 2
+# Only allow permissive / clearly compatible licenses.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "ISC",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    # webpki-roots (transitive via reqwest/rustls) uses this permissive data license
+    "CDLA-Permissive-2.0",
+]
+# Warn on unlicensed crates rather than hard-failing (some sys crates omit it).
+unused-allowed-license = "warn"
+
+# ── Bans ─────────────────────────────────────────────────────────────────────
+[bans]
+# Deny duplicate versions of the same crate — forces dependency deduplication.
+multiple-versions = "warn"
+# Hard deny these crates outright.
+deny = [
+    # High-level HTTP frameworks — rttp is intentionally from-scratch.
+    # hyper is exempted here because reqwest (oauth feature) pulls it in transitively;
+    # the ban targets direct framework use, not transitive HTTP client deps.
+    { name = "axum" },
+    { name = "actix-web" },
+    { name = "warp" },
+    # Competing async runtimes.
+    { name = "async-std" },
+    { name = "smol" },
+]
+
+# ── Sources ──────────────────────────────────────────────────────────────────
+[sources]
+# Only allow crates from crates.io (no git deps in production code).
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

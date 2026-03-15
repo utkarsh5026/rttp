@@ -1,9 +1,46 @@
 {
-    "cSpell.words": [
-        "clippy",
-        "codegen",
-        "httparse",
-        "rttp",
-        "thiserror"
-    ]
+  "cSpell.words": [
+    "apikey",
+    "Behaviour",
+    "blocklist",
+    "clippy",
+    "codegen",
+    "deadpool",
+    "getrandom",
+    "HMAC",
+    "HSTS",
+    "httparse",
+    "jsonwebtoken",
+    "nosniff",
+    "rttp",
+    "rustc",
+    "rustup",
+    "safelisted",
+    "SAMEORIGIN",
+    "serde",
+    "splitn",
+    "thiserror"
+  ],
+
+  // Rust / rust-analyzer
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.cargo.features": "all",
+  "rust-analyzer.procMacro.enable": true,
+  "rust-analyzer.cargo.buildScripts.enable": true,
+  "rust-analyzer.inlayHints.chainingHints.enable": true,
+  "rust-analyzer.inlayHints.typeHints.enable": true,
+  "rust-analyzer.semanticHighlighting.strings.enable": true,
+
+  // Editor
+  "editor.formatOnSave": true,
+  "editor.rulers": [100],
+  "editor.bracketPairColorization.enabled": true,
+  "editor.semanticHighlighting.enabled": true,
+
+  // File cleanliness
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "files.exclude": {
+    "**/target": true
+  }
 }

@@ -1,73 +1,70 @@
 # rttp Makefile
 #
-# Prerequisites:
-#   cargo install cargo-watch   (for watch / watch-test targets)
-#   cargo install cargo-audit   (for audit target)
+# All targets delegate to makefile.py for cross-platform compatibility.
+# Prerequisites: python3 + pip install rich
+#
+# Quick-install rich:  pip install rich
 
-.PHONY: all build test lint fmt fmt-check check clean doc doc-build audit run watch watch-test ci help
+PY := python
 
-## all: Run check, lint, and test (default target)
-all: check lint test
+.PHONY: all full build test lint fmt fmt-check check clean doc doc-build \
+        audit deny coverage run watch watch-test bacon ci help
 
-## build: Compile the library and all examples
-build:
-	cargo build --all-targets
+all: help
 
-## test: Run all unit and integration tests
-test:
-	cargo test --all-targets --all-features
-
-## lint: Run Clippy — warnings are treated as errors
-lint:
-	cargo clippy --all-targets --all-features -- -D warnings
-
-## fmt: Auto-format all source files with rustfmt
-fmt:
-	cargo fmt --all
-
-## fmt-check: Check formatting without modifying files (used in CI)
-fmt-check:
-	cargo fmt --all -- --check
-
-## check: Fast compile check without producing binaries
-check:
-	cargo check --all-targets --all-features
-
-## clean: Remove all build artifacts
-clean:
-	cargo clean
-
-## doc: Generate documentation and open it in the browser
-doc:
-	cargo doc --no-deps --open
-
-## doc-build: Generate documentation without opening the browser
-doc-build:
-	cargo doc --no-deps
-
-## audit: Scan dependencies for known security vulnerabilities
-audit:
-	cargo audit
-
-## run: Run the hello_world example (INFO log level)
-run:
-	RUST_LOG=info cargo run --example hello_world
-
-## watch: Watch for changes and re-run the hello_world example (requires cargo-watch)
-watch:
-	RUST_LOG=info cargo watch -x 'run --example hello_world'
-
-## watch-test: Watch for changes and re-run tests (requires cargo-watch)
-watch-test:
-	cargo watch -x 'test --all-targets'
-
-## ci: Simulate the full CI pipeline locally (fmt-check → check → lint → test → audit)
-ci: fmt-check check lint test audit
-
-## help: Show this help message
 help:
-	@echo "rttp — Rust HTTP Server Framework"
-	@echo ""
-	@echo "Usage: make [target]"
-	@echo ""
-	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## /  /' | column -t -s ':'
+	@$(PY) makefile.py help
+
+full:
+	@$(PY) makefile.py full
+
+build:
+	@$(PY) makefile.py build
+
+test:
+	@$(PY) makefile.py test
+
+lint:
+	@$(PY) makefile.py lint
+
+fmt:
+	@$(PY) makefile.py fmt
+
+fmt-check:
+	@$(PY) makefile.py fmt-check
+
+check:
+	@$(PY) makefile.py check
+
+clean:
+	@$(PY) makefile.py clean
+
+doc:
+	@$(PY) makefile.py doc
+
+doc-build:
+	@$(PY) makefile.py doc-build
+
+audit:
+	@$(PY) makefile.py audit
+
+deny:
+	@$(PY) makefile.py deny
+
+coverage:
+	@$(PY) makefile.py coverage
+
+run:
+	@$(PY) makefile.py run
+
+watch:
+	@$(PY) makefile.py watch
+
+watch-test:
+	@$(PY) makefile.py watch-test
+
+bacon:
+	@$(PY) makefile.py bacon
+
+ci:
+	@$(PY) makefile.py ci

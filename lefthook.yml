@@ -1,0 +1,21 @@
+pre-commit:
+  parallel: false
+  commands:
+    fmt:
+      glob: "**/*.rs"
+      run: rustfmt {staged_files}
+      stage_fixed: true
+      fail_text: "rustfmt failed — fix syntax errors and try again"
+    clippy:
+      run: cargo clippy --all-targets --all-features -- -D warnings
+      fail_text: "Fix the clippy warnings above before committing"
+    test:
+      run: cargo nextest run --all-targets --all-features
+      fail_text: "Fix failing tests before committing"
+
+pre-push:
+  parallel: false
+  commands:
+    test:
+      run: cargo nextest run --all-targets --all-features
+      fail_text: "Fix failing tests before pushing"

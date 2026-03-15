@@ -7,13 +7,17 @@ authors = ["Utkarsh Priyadarshi"]
 description = "A from-scratch async HTTP/1.1 server framework in Rust"
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/utkarshpriyadarshi/rttp"
+repository = "https://github.com/utkarsh5026/rttp"
 keywords = ["http", "server", "async", "web", "framework"]
 categories = [
     "network-programming",
     "web-programming::http-server",
     "asynchronous",
 ]
+
+[features]
+default = []
+oauth = ["reqwest"]
 
 [lib]
 name = "rttp"
@@ -46,6 +50,31 @@ tracing = "0.1"
 # Serialization/deserialization framework
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# JWT signing and verification
+jsonwebtoken = "9"
+
+# Cryptographically secure random number generation
+rand = "0.9"
+
+# Password hashing (Argon2id)
+argon2 = { version = "0.5", features = ["password-hash"] }
+# Pinned to 0.6 to match password-hash's rand_core version; enables OsRng
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+# Base64 encoding/decoding
+base64 = "0.22"
+uuid = { version = "1.22.0", features = ["v4", "fast-rng"] }
+
+# URL query string deserialization
+serde_urlencoded = "0.7"
+getrandom = "0.4.2"
+
+# Ergonomic async trait support
+async-trait = "0.1"
+
+# HTTP client for JWKS/OIDC discovery (oauth feature only)
+reqwest = { version = "0.12", features = ["rustls-tls", "json"], optional = true }
 
 [dev-dependencies]
 # Full tokio runtime for examples and integration tests
