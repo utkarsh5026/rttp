@@ -54,9 +54,6 @@ serde_json = "1"
 # JWT signing and verification
 jsonwebtoken = "9"
 
-# Cryptographically secure random number generation
-rand = "0.9"
-
 # Password hashing (Argon2id)
 argon2 = { version = "0.5", features = ["password-hash"] }
 # Pinned to 0.6 to match password-hash's rand_core version; enables OsRng
@@ -90,4 +87,7 @@ strip = true
 
 [profile.dev]
 opt-level = 0
-debug = true
+debug = 1  # line tables only — faster link, smaller binary
+
+[profile.dev.package."*"]
+opt-level = 2  # compile deps at O2 even in dev (tokio, bytes, etc.)
