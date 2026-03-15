@@ -2,7 +2,7 @@
 
 use crate::context::{Context, PathParams};
 use crate::extract::HandlerFn;
-use crate::middleware::{IntoMiddlewareHandler, MiddlewareHandler, wrap_with_middlewares};
+use crate::middleware::{wrap_with_middlewares, IntoMiddlewareHandler, MiddlewareHandler};
 use crate::router::handler::IntoRouteConfig;
 use crate::router::pattern::Pattern;
 use crate::{Method, Request, Response, StatusCode};
@@ -363,7 +363,10 @@ impl Router {
         let full = if self.prefix.is_empty() {
             path.to_string()
         } else {
-            format!("{}{}", self.prefix, path)
+            let mut s = String::with_capacity(self.prefix.len() + path.len());
+            s.push_str(&self.prefix);
+            s.push_str(path);
+            s
         };
         let wrapped = wrap_with_middlewares(handler, &self.middlewares);
         self.routes.push(Route::new(method, &full, wrapped));
@@ -632,7 +635,9 @@ impl Router {
     pub fn nest(&mut self, prefix: &str, other: Router) {
         let prefix = prefix.trim_end_matches('/');
         for route in other.routes {
-            let new_pattern = format!("{}{}", prefix, route.pattern_str);
+            let mut new_pattern = String::with_capacity(prefix.len() + route.pattern_str.len());
+            new_pattern.push_str(prefix);
+            new_pattern.push_str(&route.pattern_str);
             self.routes
                 .push(Route::new(route.method, &new_pattern, route.handler));
         }
@@ -731,8 +736,9 @@ impl Router {
     ///
     /// Returns `404 Not Found` when no route matches.
     pub async fn dispatch(&self, mut ctx: Context) -> Response {
+        // Hoist outside the loop — avoids repeated accessor calls per iteration.
+        let (method, path) = (ctx.request().method(), ctx.request().path());
         for route in &self.routes {
-            let (method, path) = (ctx.request().method(), ctx.request().path());
             if let Some(params) = route.matches(method, path) {
                 *ctx.params_mut() = params;
                 return (route.handler)(ctx).await;

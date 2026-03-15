@@ -15,11 +15,11 @@
 //! Routes are matched in registration order; the first route whose method and pattern both
 //! match the incoming request wins.
 
+mod core;
 /// Handler conversion traits for wrapping async functions and middleware pipelines.
 pub mod handler;
 /// URL pattern parsing and matching for route registration.
 pub mod pattern;
-mod router;
 
+pub use core::{RouteBuilder, Router};
 pub use handler::{IntoHandler, IntoRouteConfig};
-pub use router::{RouteBuilder, Router};
