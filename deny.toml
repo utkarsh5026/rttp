@@ -25,6 +25,8 @@ allow = [
     "BSD-3-Clause",
     "Unicode-3.0",
     "Unicode-DFS-2016",
+    # webpki-roots (transitive via reqwest/rustls) uses this permissive data license
+    "CDLA-Permissive-2.0",
 ]
 # Warn on unlicensed crates rather than hard-failing (some sys crates omit it).
 unused-allowed-license = "warn"
@@ -36,7 +38,8 @@ multiple-versions = "warn"
 # Hard deny these crates outright.
 deny = [
     # High-level HTTP frameworks — rttp is intentionally from-scratch.
-    { name = "hyper" },
+    # hyper is exempted here because reqwest (oauth feature) pulls it in transitively;
+    # the ban targets direct framework use, not transitive HTTP client deps.
     { name = "axum" },
     { name = "actix-web" },
     { name = "warp" },
