@@ -98,6 +98,15 @@ impl Response {
         self
     }
 
+    /// Removes the response body in-place, keeping all headers intact.
+    ///
+    /// Used by the router's HEAD auto-fallback: after running the GET handler the body is
+    /// stripped so only headers (including `Content-Length`) are sent, as required by
+    /// [RFC 9110 §9.3.2](https://www.rfc-editor.org/rfc/rfc9110#section-9.3.2).
+    pub fn strip_body(&mut self) {
+        self.body.clear();
+    }
+
     /// Controls whether the `Connection: keep-alive` or `Connection: close` header is written.
     ///
     /// Defaults to `true`. Set to `false` to signal the client that the TCP connection

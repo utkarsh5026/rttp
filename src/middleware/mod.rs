@@ -28,6 +28,72 @@ use tokio::time::Instant;
 
 use crate::{Response, context::Context};
 
+/// Conversion into a [`MiddlewareHandler`].
+///
+/// Implemented for:
+/// - [`MiddlewareHandler`] itself (identity)
+/// - `Arc<M>` where `M: Middleware`
+/// - Any closure matching the `(Context, Next) -> Pin<Box<...>>` signature
+///
+/// Used by [`Router::middleware`](crate::router::Router::middleware) and
+/// [`RouteBuilder::middleware`](crate::router::RouteBuilder::middleware) so callers
+/// never need to construct an `Arc` or call [`from_middleware`] manually.
+pub trait IntoMiddlewareHandler: Send + Sync + 'static {
+    fn into_middleware_handler(self) -> MiddlewareHandler;
+}
+
+impl IntoMiddlewareHandler for MiddlewareHandler {
+    fn into_middleware_handler(self) -> MiddlewareHandler {
+        self
+    }
+}
+
+impl<M: Middleware + 'static> IntoMiddlewareHandler for Arc<M> {
+    fn into_middleware_handler(self) -> MiddlewareHandler {
+        from_middleware(self)
+    }
+}
+
+impl<F> IntoMiddlewareHandler for F
+where
+    F: Fn(Context, Next) -> Pin<Box<dyn Future<Output = Response> + Send>> + Send + Sync + 'static,
+{
+    fn into_middleware_handler(self) -> MiddlewareHandler {
+        Arc::new(self)
+    }
+}
+
+/// Build a `Vec<MiddlewareHandler>` from a comma-separated list of middleware values.
+///
+/// Each item is converted via [`IntoMiddlewareHandler`], so you can mix closures,
+/// `Arc<M>` implementations, and raw [`MiddlewareHandler`]s in one call.
+///
+/// Intended for use with [`RouteBuilder::middlewares`](crate::router::RouteBuilder::middlewares)
+/// and [`Router::middlewares`](crate::router::Router::middlewares).
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use std::{pin::Pin, sync::Arc};
+/// use rttp::{middlewares, Response, context::Context};
+/// use rttp::middleware::{Next, LoggerMiddleware};
+///
+/// let stack = middlewares![
+///     Arc::new(LoggerMiddleware),
+///     |ctx: Context, next: Next| -> Pin<Box<dyn std::future::Future<Output = Response> + Send>> {
+///         Box::pin(async move { next.run(ctx).await })
+///     },
+/// ];
+/// ```
+#[macro_export]
+macro_rules! middlewares {
+    ($($mw:expr),+ $(,)?) => {
+        vec![
+            $($crate::middleware::IntoMiddlewareHandler::into_middleware_handler($mw)),+
+        ]
+    };
+}
+
 /// A cursor into the remaining middleware chain for a single request.
 ///
 /// `Next` is passed to each middleware's [`Middleware::handle`] implementation.
@@ -164,7 +230,7 @@ impl Next {
 /// - Implementations **must** be `Send + Sync` because middleware is shared across
 ///   Tokio tasks.
 /// - `handle` **must** return a pinned, `Send` future so it can be awaited across
-///   `.await` points in multi-threaded runtimes.
+///   `.await` points in multithreaded runtimes.
 /// - Implementations **should not** hold `&mut` references to shared state across
 ///   an `.await` point.
 pub trait Middleware: Send + Sync {
