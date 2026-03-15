@@ -82,6 +82,14 @@ tokio = { version = "1", features = ["full"] }
 # Subscriber for examples — not exposed to library consumers
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
+[[example]]
+name = "hello_world"
+path = "examples/hello_world.rs"
+
+[[example]]
+name = "todo_api"
+path = "examples/todo_api.rs"
+
 [profile.release]
 opt-level = 3
 lto = true
