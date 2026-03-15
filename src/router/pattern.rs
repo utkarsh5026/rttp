@@ -1,6 +1,6 @@
 //! URL pattern parsing and matching.
 //!
-//! A [`Pattern`] is compiled once at route registration time from a pattern string and
+//! A `Pattern` is compiled once at route registration time from a pattern string and
 //! reused for every incoming request. Three variants are supported:
 //!
 //! | Pattern        | Example match            | Captured params              |

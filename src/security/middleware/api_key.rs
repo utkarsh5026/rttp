@@ -2,7 +2,7 @@
 //!
 //! Extracts the API key from either the `X-Api-Key` header or the
 //! `Authorization: ApiKey <key>` header, validates it against a pluggable
-//! [`ApiKeyStore`], and injects the resolved [`ApiKeyIdentity`] into the
+//! [`ApiKeyStore`], and injects the resolved [`crate::security::auth::api_key::ApiKeyIdentity`] into the
 //! request context on success.
 //!
 //! # Behavior
@@ -44,7 +44,7 @@ use crate::{
 /// Middleware that authenticates requests using an API key.
 ///
 /// Wraps any [`ApiKeyStore`] implementation and guards the downstream handler
-/// chain. On success the resolved [`ApiKeyIdentity`] is inserted into the
+/// chain. On success the resolved [`crate::security::auth::api_key::ApiKeyIdentity`] is inserted into the
 /// request [`Context`] extensions so downstream handlers can read it.
 pub struct ApiKeyMiddleware<S: ApiKeyStore> {
     store: Arc<S>,
@@ -81,7 +81,7 @@ impl<S: ApiKeyStore + 'static> Middleware for ApiKeyMiddleware<S> {
     ///
     /// Returns `401 Unauthorized` when no API key header is present, and
     /// `403 Forbidden` when the key is unknown or expired. On a valid key the
-    /// resolved [`ApiKeyIdentity`] is inserted into `ctx` extensions before
+    /// resolved [`crate::security::auth::api_key::ApiKeyIdentity`] is inserted into `ctx` extensions before
     /// calling `next`.
     fn handle(&self, ctx: Context, next: Next) -> Pin<Box<dyn Future<Output = Response> + Send>> {
         let store = Arc::clone(&self.store);
@@ -153,7 +153,7 @@ mod tests {
         make_context(raw.as_bytes())
     }
 
-    /// A `Next` that reads the injected [`ApiKeyIdentity`] and echoes `name`.
+    /// A `Next` that reads the injected [`crate::security::auth::api_key::ApiKeyIdentity`] and echoes `name`.
     fn identity_echo_next() -> Next {
         let handler: MiddlewareHandler = Arc::new(|ctx: Context, _next: Next| {
             Box::pin(async move {

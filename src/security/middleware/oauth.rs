@@ -2,7 +2,7 @@
 //!
 //! Extracts `Authorization: Bearer <token>`, validates the token against the
 //! provider's JWKS via [`OAuthValidator`], and injects the decoded
-//! [`OAuthClaims`] into the request context for downstream handlers.
+//! [`crate::security::auth::oauth::OAuthClaims`] into the request context for downstream handlers.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -19,7 +19,7 @@ use crate::{
 ///
 /// Extracts the `Authorization: Bearer <token>` header from each incoming
 /// request, validates the JWT against the provider's JWKS using the configured
-/// [`OAuthValidator`], and — on success — injects the decoded [`OAuthClaims`]
+/// [`OAuthValidator`], and — on success — injects the decoded [`crate::security::auth::oauth::OAuthClaims`]
 /// into [`Context::extensions`] so downstream handlers can retrieve them with
 /// `ctx.extensions().get::<OAuthClaims>()`.
 ///
@@ -63,7 +63,7 @@ impl Middleware for OAuthMiddleware {
     /// 2. If missing, returns `401 Unauthorized` immediately.
     /// 3. Strips the `Bearer ` prefix and validates the token.
     /// 4. If the token is invalid or expired, returns `401 Unauthorized`.
-    /// 5. On success, injects [`OAuthClaims`] into `ctx.extensions` and
+    /// 5. On success, injects [`crate::security::auth::oauth::OAuthClaims`] into `ctx.extensions` and
     ///    delegates to the next middleware.
     fn handle(&self, ctx: Context, next: Next) -> Pin<Box<dyn Future<Output = Response> + Send>> {
         let validator = Arc::clone(&self.validator);

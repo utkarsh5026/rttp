@@ -90,7 +90,7 @@ impl<'a> RouteBuilder<'a> {
 
     /// Attach a batch of middlewares to all handlers on this path.
     ///
-    /// Accepts a `Vec<MiddlewareHandler>` — typically produced by the [`middlewares!`] macro.
+    /// Accepts a `Vec<MiddlewareHandler>` — typically produced by the [`crate::middlewares`] macro.
     /// Middlewares are appended in order after any previously attached middleware.
     ///
     /// # Examples
@@ -327,7 +327,7 @@ impl Router {
 
     /// Attach a batch of middlewares to every route registered on this router.
     ///
-    /// Accepts a `Vec<MiddlewareHandler>` — typically produced by the [`middlewares!`] macro.
+    /// Accepts a `Vec<MiddlewareHandler>` — typically produced by the [`crate::middlewares`] macro.
     /// Appended in order after any previously attached router-level middleware.
     ///
     /// # Examples
