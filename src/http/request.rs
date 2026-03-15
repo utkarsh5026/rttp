@@ -5,11 +5,12 @@
 //! possible: headers are validated in-place by `httparse` and the body is captured as a
 //! [`bytes::Bytes`] slice of the original buffer.
 
-use std::collections::HashMap;
-
 use bytes::Bytes;
+use serde::de::DeserializeOwned;
 use thiserror::Error;
 
+use super::cookie::CookieJar;
+use super::query::QueryParams;
 use super::{Headers, Method};
 
 /// Errors that can occur while parsing an HTTP/1.1 request.
@@ -30,6 +31,22 @@ pub enum RequestError {
     /// The declared `Content-Length` exceeds the configured body size limit.
     #[error("request body exceeds maximum allowed size of {max_bytes} bytes")]
     BodyTooLarge { max_bytes: usize },
+
+    /// The `Content-Type` header is missing on a request that requires it.
+    #[error("missing Content-Type header")]
+    MissingContentType,
+
+    /// The `Content-Type` header does not match the expected media type.
+    #[error("invalid content type: expected {expected}, got {actual}")]
+    InvalidContentType { expected: String, actual: String },
+
+    /// The request body could not be deserialized as JSON.
+    #[error("JSON parse error: {0}")]
+    InvalidJson(#[from] serde_json::Error),
+
+    /// The request body could not be deserialized as URL-encoded form data.
+    #[error("form parse error: {0}")]
+    InvalidForm(#[from] serde_urlencoded::de::Error),
 }
 
 /// A fully parsed HTTP/1.1 request.
@@ -57,9 +74,9 @@ pub struct Request {
     /// HTTP minor version: 0 for HTTP/1.0, 1 for HTTP/1.1.
     version: u8,
     headers: Headers,
-    query: Option<String>,
+    raw_query: Option<String>,
     body: Bytes,
-    params: HashMap<String, String>,
+    query: QueryParams,
 }
 
 impl Request {
@@ -95,7 +112,7 @@ impl Request {
             .path
             .ok_or(RequestError::MissingField { field: "path" })?;
 
-        let (path, query) = match raw_path.find('?') {
+        let (path, raw_query) = match raw_path.find('?') {
             Some(pos) => (
                 raw_path[..pos].to_owned(),
                 Some(raw_path[pos + 1..].to_owned()),
@@ -114,7 +131,10 @@ impl Request {
             }
         }
 
-        let params = query.as_deref().map(parse_query_string).unwrap_or_default();
+        let query = raw_query
+            .as_deref()
+            .map(QueryParams::parse)
+            .unwrap_or_else(QueryParams::empty);
 
         let content_length = header_map
             .get("content-length")
@@ -129,9 +149,9 @@ impl Request {
                 path,
                 version,
                 headers: header_map,
-                query,
+                raw_query,
                 body,
-                params,
+                query,
             },
             body_offset,
         ))
@@ -173,14 +193,32 @@ impl Request {
 
     /// Returns the raw query string (without the leading `?`), if any.
     pub fn query_string(&self) -> Option<&str> {
-        self.query.as_deref()
+        self.raw_query.as_deref()
     }
 
-    /// Returns a parsed query parameter value by key.
+    /// Returns the parsed query parameters.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rttp::http::request::Request;
+    ///
+    /// let raw = b"GET /search?tag=rust&tag=async HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    /// let (req, _) = Request::parse(raw).unwrap();
+    /// assert_eq!(req.query().get("tag"), Some("rust"));
+    /// assert_eq!(req.query().get_all("tag"), &["rust", "async"]);
+    /// ```
+    pub fn query(&self) -> &QueryParams {
+        &self.query
+    }
+
+    /// Returns a parsed query parameter value by key (first value if multi-valued).
+    ///
+    /// Convenience method that delegates to [`QueryParams::get`].
     ///
     /// # Arguments
     ///
-    /// - `key` — the query parameter name (case-sensitive, `+`-decoded).
+    /// - `key` — the query parameter name (case-sensitive, percent-decoded).
     ///
     /// # Examples
     ///
@@ -193,12 +231,12 @@ impl Request {
     /// assert_eq!(req.query_param("missing"), None);
     /// ```
     pub fn query_param(&self, key: &str) -> Option<&str> {
-        self.params.get(key).map(String::as_str)
+        self.query.get(key)
     }
 
     /// Returns an iterator over all parsed query parameters as `(key, value)` pairs.
     ///
-    /// The iteration order is unspecified (backed by a `HashMap`).
+    /// For multi-valued keys, each value is yielded as a separate pair.
     ///
     /// # Examples
     ///
@@ -212,12 +250,95 @@ impl Request {
     /// assert_eq!(pairs, vec![("a", "1"), ("b", "2")]);
     /// ```
     pub fn query_params(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.params.iter().map(|(k, v)| (k.as_str(), v.as_str()))
+        self.query.iter()
     }
 
     /// Returns the request body bytes.
     pub fn body(&self) -> &Bytes {
         &self.body
+    }
+
+    /// Deserializes the request body as JSON.
+    ///
+    /// Checks that `Content-Type` is `application/json` before parsing. This method
+    /// borrows the body and can be called multiple times (re-parses each time).
+    ///
+    /// # Errors
+    ///
+    /// - [`RequestError::MissingContentType`] — no `Content-Type` header present.
+    /// - [`RequestError::InvalidContentType`] — `Content-Type` is not `application/json`.
+    /// - [`RequestError::InvalidJson`] — the body is not valid JSON or does not match `T`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rttp::http::request::Request;
+    /// use serde::Deserialize;
+    ///
+    /// #[derive(Deserialize)]
+    /// struct Payload { name: String }
+    ///
+    /// let raw = b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 16\r\n\r\n{\"name\":\"world\"}";
+    /// let (req, _) = Request::parse(raw).unwrap();
+    /// let payload: Payload = req.json().unwrap();
+    /// assert_eq!(payload.name, "world");
+    /// ```
+    pub fn json<T: DeserializeOwned>(&self) -> Result<T, RequestError> {
+        self.expect_content_type("application/json")?;
+        Ok(serde_json::from_slice(&self.body)?)
+    }
+
+    /// Deserializes the request body as URL-encoded form data.
+    ///
+    /// Checks that `Content-Type` is `application/x-www-form-urlencoded` before parsing.
+    /// This method borrows the body and can be called multiple times.
+    ///
+    /// # Errors
+    ///
+    /// - [`RequestError::MissingContentType`] — no `Content-Type` header present.
+    /// - [`RequestError::InvalidContentType`] — wrong `Content-Type`.
+    /// - [`RequestError::InvalidForm`] — the body is not valid form data or does not match `T`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rttp::http::request::Request;
+    /// use serde::Deserialize;
+    ///
+    /// #[derive(Deserialize)]
+    /// struct Login { user: String, pass: String }
+    ///
+    /// let raw = b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 19\r\n\r\nuser=admin&pass=123";
+    /// let (req, _) = Request::parse(raw).unwrap();
+    /// let login: Login = req.form().unwrap();
+    /// assert_eq!(login.user, "admin");
+    /// assert_eq!(login.pass, "123");
+    /// ```
+    pub fn form<T: DeserializeOwned>(&self) -> Result<T, RequestError> {
+        self.expect_content_type("application/x-www-form-urlencoded")?;
+        Ok(serde_urlencoded::from_bytes(&self.body)?)
+    }
+
+    /// Parses the `Cookie` request header into a [`CookieJar`].
+    ///
+    /// Returns an empty jar if no `Cookie` header is present.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rttp::http::request::Request;
+    ///
+    /// let raw = b"GET / HTTP/1.1\r\nHost: localhost\r\nCookie: session=abc; theme=dark\r\n\r\n";
+    /// let (req, _) = Request::parse(raw).unwrap();
+    /// let cookies = req.cookies();
+    /// assert_eq!(cookies.get("session"), Some("abc"));
+    /// assert_eq!(cookies.get("theme"), Some("dark"));
+    /// ```
+    pub fn cookies(&self) -> CookieJar {
+        match self.headers.get("cookie") {
+            Some(header) => CookieJar::parse(header),
+            None => CookieJar::default(),
+        }
     }
 
     /// Returns `true` if the connection should be kept alive after this request.
@@ -235,23 +356,27 @@ impl Request {
     pub fn content_length(&self) -> Option<usize> {
         self.headers.get("content-length")?.parse().ok()
     }
-}
 
-/// Parses a URL query string (`key=value&key2=value2`) into a `HashMap`.
-///
-/// Keys and values have `+` decoded as a space. Full percent-decoding is
-/// intentionally omitted here; it will be added with the `percent-encoding`
-/// crate when the `context` module is implemented.
-fn parse_query_string(query: &str) -> HashMap<String, String> {
-    query
-        .split('&')
-        .filter_map(|pair| {
-            let mut parts = pair.splitn(2, '=');
-            let key = parts.next()?.replace('+', " ");
-            let value = parts.next().unwrap_or("").replace('+', " ");
-            Some((key, value))
-        })
-        .collect()
+    /// Validates that the `Content-Type` header matches the expected media type.
+    ///
+    /// Comparison ignores parameters (e.g. `; charset=utf-8`) and is case-insensitive.
+    fn expect_content_type(&self, expected: &str) -> Result<(), RequestError> {
+        let actual = self
+            .headers
+            .get("content-type")
+            .ok_or(RequestError::MissingContentType)?;
+
+        let media_type = actual.split(';').next().unwrap_or(actual).trim();
+
+        if !media_type.eq_ignore_ascii_case(expected) {
+            return Err(RequestError::InvalidContentType {
+                expected: expected.to_owned(),
+                actual: media_type.to_owned(),
+            });
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -270,13 +395,28 @@ mod tests {
     }
 
     #[test]
-    fn parse_query_string() {
+    fn parse_query_string_simple() {
         let raw = b"GET /search?q=rust&page=2 HTTP/1.1\r\nHost: example.com\r\n\r\n";
         let (req, _) = Request::parse(raw).unwrap();
         assert_eq!(req.path(), "/search");
         assert_eq!(req.query_string(), Some("q=rust&page=2"));
         assert_eq!(req.query_param("q"), Some("rust"));
         assert_eq!(req.query_param("page"), Some("2"));
+    }
+
+    #[test]
+    fn parse_query_multi_value() {
+        let raw = b"GET /items?tag=a&tag=b&tag=c HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let (req, _) = Request::parse(raw).unwrap();
+        assert_eq!(req.query_param("tag"), Some("a"));
+        assert_eq!(req.query().get_all("tag"), &["a", "b", "c"]);
+    }
+
+    #[test]
+    fn parse_query_percent_encoded() {
+        let raw = b"GET /search?q=hello%20world HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let (req, _) = Request::parse(raw).unwrap();
+        assert_eq!(req.query_param("q"), Some("hello world"));
     }
 
     #[test]
@@ -305,5 +445,102 @@ mod tests {
         let (req, body_offset) = Request::parse(raw).unwrap();
         assert_eq!(req.content_length(), Some(5));
         assert_eq!(&raw[body_offset..], b"hello");
+    }
+
+    #[test]
+    fn json_body_parsing() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        struct Msg {
+            text: String,
+        }
+
+        let raw = b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 16\r\n\r\n{\"text\":\"hello\"}";
+        let (req, _) = Request::parse(raw).unwrap();
+        let msg: Msg = req.json().unwrap();
+        assert_eq!(
+            msg,
+            Msg {
+                text: "hello".into()
+            }
+        );
+    }
+
+    #[test]
+    fn json_wrong_content_type() {
+        let raw = b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\n{}";
+        let (req, _) = Request::parse(raw).unwrap();
+        let err = req.json::<serde_json::Value>().unwrap_err();
+        assert!(matches!(err, RequestError::InvalidContentType { .. }));
+    }
+
+    #[test]
+    fn json_missing_content_type() {
+        let raw = b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\n{}";
+        let (req, _) = Request::parse(raw).unwrap();
+        let err = req.json::<serde_json::Value>().unwrap_err();
+        assert!(matches!(err, RequestError::MissingContentType));
+    }
+
+    #[test]
+    fn json_content_type_with_charset() {
+        let raw = b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: 2\r\n\r\n{}";
+        let (req, _) = Request::parse(raw).unwrap();
+        let val: serde_json::Value = req.json().unwrap();
+        assert_eq!(val, serde_json::json!({}));
+    }
+
+    #[test]
+    fn form_body_parsing() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        struct Login {
+            user: String,
+            pass: String,
+        }
+
+        let raw = b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 19\r\n\r\nuser=admin&pass=123";
+        let (req, _) = Request::parse(raw).unwrap();
+        let login: Login = req.form().unwrap();
+        assert_eq!(
+            login,
+            Login {
+                user: "admin".into(),
+                pass: "123".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn form_wrong_content_type() {
+        let raw = b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 5\r\n\r\na=1&b";
+        let (req, _) = Request::parse(raw).unwrap();
+        let err = req
+            .form::<std::collections::HashMap<String, String>>()
+            .unwrap_err();
+        assert!(matches!(err, RequestError::InvalidContentType { .. }));
+    }
+
+    #[test]
+    fn cookies_parsing() {
+        let raw = b"GET / HTTP/1.1\r\nHost: localhost\r\nCookie: session=abc; theme=dark\r\n\r\n";
+        let (req, _) = Request::parse(raw).unwrap();
+        let cookies = req.cookies();
+        assert_eq!(cookies.get("session"), Some("abc"));
+        assert_eq!(cookies.get("theme"), Some("dark"));
+    }
+
+    #[test]
+    fn cookies_empty_when_no_header() {
+        let raw = b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let (req, _) = Request::parse(raw).unwrap();
+        let cookies = req.cookies();
+        assert!(cookies.is_empty());
+    }
+
+    #[test]
+    fn no_query_returns_empty_params() {
+        let raw = b"GET /path HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let (req, _) = Request::parse(raw).unwrap();
+        assert!(req.query().is_empty());
+        assert_eq!(req.query_string(), None);
     }
 }
