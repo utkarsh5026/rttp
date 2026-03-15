@@ -137,9 +137,7 @@ impl Pattern {
                 let mut matched = 0;
 
                 for seg in segments.iter() {
-                    let Some(path_seg) = path_iter.next() else {
-                        return None;
-                    };
+                    let path_seg = path_iter.next()?;
                     match seg {
                         Segment::Static(s) => {
                             if s != path_seg {
