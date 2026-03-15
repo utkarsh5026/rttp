@@ -90,6 +90,7 @@ impl<'a> RouteBuilder<'a> {
     pub fn connect(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Connect, handler) }
 }
 
+
 /// HTTP request router that dispatches requests to registered handler functions.
 ///
 /// Routes are evaluated in registration order; the first route whose HTTP method and path
@@ -112,6 +113,8 @@ impl<'a> RouteBuilder<'a> {
 /// ```
 pub struct Router {
     pub(super) routes: Vec<Route>,
+    prefix: String,
+    name: Option<String>,
 }
 
 impl Default for Router {
@@ -132,15 +135,80 @@ impl Router {
     /// assert!(router.is_empty());
     /// ```
     pub fn new() -> Self {
-        Self { routes: Vec::new() }
+        Self { routes: Vec::new(), prefix: String::new(), name: None }
+    }
+
+    /// Create a router whose routes are all automatically prefixed with `prefix`.
+    ///
+    /// Equivalent to `Router::new()` followed by setting a base path. All routes registered
+    /// on this router have `prefix` prepended, so you write short paths and the full URL is
+    /// assembled for you. A trailing slash on `prefix` is stripped before concatenation.
+    ///
+    /// Compose scoped routers into a parent with [`merge`](Self::merge) (paths are already
+    /// fully formed) or with [`nest`](Self::nest) to add a further outer prefix on top.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use rttp::{Router, Response, StatusCode};
+    ///
+    /// let mut users = Router::scoped("/api/v1");
+    /// users.get("/users", |_ctx| async { Response::new(StatusCode::Ok) });
+    /// users.get("/users/:id", |_ctx| async { Response::new(StatusCode::Ok) });
+    ///
+    /// let mut router = Router::new();
+    /// router.merge(users);
+    /// // router now has: GET /api/v1/users, GET /api/v1/users/:id
+    /// ```
+    pub fn scoped(prefix: &str) -> Self {
+        Self {
+            routes: Vec::new(),
+            prefix: prefix.trim_end_matches('/').to_string(),
+            name: None,
+        }
+    }
+
+    /// Attach a human-readable name to this router.
+    ///
+    /// The name is carried through [`merge`](Self::merge) and [`nest`](Self::nest) only as
+    /// metadata on the source router — it is not transferred to the parent. Use it for
+    /// startup logging, OpenAPI tag grouping, or test assertions via [`name()`](Self::name).
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use rttp::{Router, Response, StatusCode};
+    ///
+    /// let mut users = Router::scoped("/users").named("Users");
+    /// users.get("", |_ctx| async { Response::new(StatusCode::Ok) });
+    /// assert_eq!(users.name(), Some("Users"));
+    /// ```
+    #[must_use]
+    pub fn named(mut self, name: &str) -> Self {
+        self.name = Some(name.to_string());
+        self
+    }
+
+    /// Return this router's name, if one was set with [`named`](Self::named).
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    /// Return this router's base prefix, if one was set with [`scoped`](Self::scoped).
+    pub fn prefix(&self) -> &str {
+        &self.prefix
     }
 
     /// Low-level route registration used by all public method helpers (`get`, `post`, …).
     ///
-    /// Converts `handler` into a boxed [`HandlerFn`] via [`IntoRouteConfig`], then appends a
-    /// new [`Route`] binding `method` + `path` to that function to the route table.
+    /// Prepends this router's prefix (if any) before storing the route.
     fn register(&mut self, method: Method, path: &str, handler: impl IntoRouteConfig) {
-        self.routes.push(Route::new(method, path, handler.into_route_fn()));
+        let full = if self.prefix.is_empty() {
+            path.to_string()
+        } else {
+            format!("{}{}", self.prefix, path)
+        };
+        self.routes.push(Route::new(method, &full, handler.into_route_fn()));
     }
 
     /// Register a handler for `GET` requests matching `path`.
@@ -333,6 +401,7 @@ impl Router {
     pub fn route(&mut self, path: &str) -> RouteBuilder<'_> {
         RouteBuilder::new(self, path)
     }
+
 
     /// Register a route with a pre-built [`HandlerFn`].
     ///
@@ -893,5 +962,69 @@ mod tests {
                 "method {method} should match"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn scoped_router_prepends_prefix_on_merge() {
+        let mut users = Router::scoped("/api/v1");
+        users.get("/users", |_ctx| async { Response::new(StatusCode::Ok) });
+        users.post("/users", |_ctx| async { Response::new(StatusCode::Created) });
+        users.delete("/users/:id", |_ctx| async { Response::new(StatusCode::Ok) });
+
+        let mut router = Router::new();
+        router.merge(users);
+
+        assert_eq!(router.len(), 3);
+        assert_eq!(router.handle(make_request("GET", "/api/v1/users")).await.status(), StatusCode::Ok);
+        assert_eq!(router.handle(make_request("POST", "/api/v1/users")).await.status(), StatusCode::Created);
+        assert_eq!(router.handle(make_request("DELETE", "/api/v1/users/42")).await.status(), StatusCode::Ok);
+        assert_eq!(router.handle(make_request("GET", "/users")).await.status(), StatusCode::NotFound);
+    }
+
+    #[tokio::test]
+    async fn scoped_router_trailing_slash_normalized() {
+        let mut sub = Router::scoped("/api/");
+        sub.get("/ping", |_ctx| async { Response::new(StatusCode::Ok) });
+
+        let mut router = Router::new();
+        router.merge(sub);
+
+        assert_eq!(router.handle(make_request("GET", "/api/ping")).await.status(), StatusCode::Ok);
+    }
+
+    #[tokio::test]
+    async fn scoped_router_with_nest_adds_outer_prefix() {
+        let mut users = Router::scoped("/users");
+        users.get("", |_ctx| async { Response::new(StatusCode::Ok) });
+        users.get("/:id", |_ctx| async { Response::new(StatusCode::Ok) });
+
+        let mut router = Router::new();
+        router.nest("/api/v1", users);
+
+        assert_eq!(router.handle(make_request("GET", "/api/v1/users")).await.status(), StatusCode::Ok);
+        assert_eq!(router.handle(make_request("GET", "/api/v1/users/42")).await.status(), StatusCode::Ok);
+    }
+
+    #[test]
+    fn scoped_router_name_and_prefix_accessors() {
+        let router = Router::scoped("/api/v1").named("Users");
+        assert_eq!(router.prefix(), "/api/v1");
+        assert_eq!(router.name(), Some("Users"));
+    }
+
+    #[test]
+    fn scoped_router_routes_iterator_shows_full_paths() {
+        let mut router = Router::scoped("/api");
+        router.get("/health", |_ctx| async { Response::new(StatusCode::Ok) });
+
+        let paths: Vec<&str> = router.routes().map(|(_, p)| p).collect();
+        assert_eq!(paths, ["/api/health"]);
+    }
+
+    #[test]
+    fn new_router_has_empty_prefix_and_no_name() {
+        let router = Router::new();
+        assert_eq!(router.prefix(), "");
+        assert_eq!(router.name(), None);
     }
 }
