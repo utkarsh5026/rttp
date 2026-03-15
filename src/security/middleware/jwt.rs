@@ -10,12 +10,12 @@ use std::sync::Arc;
 use tracing::warn;
 
 use crate::{
+    Response,
     context::Context,
     middleware::{Middleware, Next},
     security::auth::{Claims, JwtAuth},
     security::middleware::util::extract_client_ip,
     security::token::{blocklist::TokenBlocklist, brute_force::LoginAttemptTracker},
-    Response,
 };
 
 /// JWT Bearer-token authentication middleware.
@@ -196,11 +196,11 @@ mod tests {
     use std::sync::Arc;
 
     use crate::{
-        context::Context, middleware::{Middleware, MiddlewareHandler, Next},
+        Response, StatusCode,
+        context::Context,
+        middleware::{Middleware, MiddlewareHandler, Next},
         security::auth::{Claims, JwtAuth},
         security::middleware::test_helpers::{make_context, ok_next, response_to_string},
-        Response,
-        StatusCode,
     };
 
     use super::JwtMiddleware;

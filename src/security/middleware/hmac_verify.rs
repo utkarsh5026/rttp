@@ -209,7 +209,6 @@ fn ror32(x: u32, n: u32) -> u32 {
     x.rotate_right(n)
 }
 
-
 /// Decode a hex string into bytes.
 fn hex_decode(hex: &str) -> Option<Vec<u8>> {
     if hex.len() % 2 != 0 {

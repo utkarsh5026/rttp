@@ -21,7 +21,7 @@ use std::sync::Arc;
 use crate::context::{Context, PathParams};
 use crate::extract::HandlerFn;
 use crate::http::response::IntoResponse;
-use crate::middleware::{from_middleware, wrap_with_middlewares, Middleware, MiddlewareHandler};
+use crate::middleware::{Middleware, MiddlewareHandler, from_middleware, wrap_with_middlewares};
 use crate::{Method, Request, Response, StatusCode};
 
 /// Conversion trait for async handler functions.

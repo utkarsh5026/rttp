@@ -45,9 +45,9 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
-    context::Context, middleware::{Middleware, Next},
-    Response,
-    StatusCode,
+    Response, StatusCode,
+    context::Context,
+    middleware::{Middleware, Next},
 };
 
 // ── Error ──────────────────────────────────────────────────────────────────────

@@ -15,9 +15,9 @@ use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 
 use crate::http::{
+    StatusCode,
     request::{Request, RequestError},
     response::Response,
-    StatusCode,
 };
 
 /// Errors produced by the server.

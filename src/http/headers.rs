@@ -325,10 +325,7 @@ impl Headers {
     /// assert_eq!(jar.get("theme"), Some("dark"));
     /// ```
     pub fn cookies(&self) -> CookieJar {
-        let combined = self
-            .get_all("cookie")
-            .collect::<Vec<_>>()
-            .join("; ");
+        let combined = self.get_all("cookie").collect::<Vec<_>>().join("; ");
         CookieJar::parse(&combined)
     }
 

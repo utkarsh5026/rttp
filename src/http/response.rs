@@ -167,7 +167,7 @@ impl Response {
             )
             .as_bytes(),
         );
-        
+
         for (name, value) in self.headers.iter() {
             buf.put(format!("{name}: {value}\r\n").as_bytes());
         }
@@ -186,7 +186,6 @@ impl Default for Response {
         Self::new(StatusCode::Ok)
     }
 }
-
 
 /// Trait for types that can be converted into an HTTP [`Response`].
 ///
@@ -255,7 +254,6 @@ impl<T: IntoResponse, E: IntoResponse> IntoResponse for Result<T, E> {
         }
     }
 }
-
 
 impl Response {
     /// Sets the status code on an existing response.

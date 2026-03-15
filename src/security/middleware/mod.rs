@@ -14,9 +14,9 @@
 //! | [`hmac_verify`]    | Active | HMAC request body signature verification |
 //! | [`csp_builder`]    | Active | Typed Content Security Policy builder    |
 
-pub(super) mod util;
 #[cfg(test)]
 pub(crate) mod test_helpers;
+pub(super) mod util;
 
 pub mod api_key;
 pub mod audit;

@@ -10,10 +10,10 @@
 
 pub mod api_key;
 pub mod jwt;
-pub mod password;
-pub mod session;
 #[cfg(feature = "oauth")]
 pub mod oauth;
+pub mod password;
+pub mod session;
 
 pub use api_key::{ApiKeyIdentity, ApiKeyStore, InMemoryApiKeyStore};
 pub use jwt::{Claims, JwtAuth, JwtError};

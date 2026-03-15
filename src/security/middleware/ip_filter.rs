@@ -32,9 +32,9 @@ use std::{
 };
 
 use crate::{
-    context::Context, middleware::{Middleware, Next},
-    Response,
-    StatusCode,
+    Response, StatusCode,
+    context::Context,
+    middleware::{Middleware, Next},
 };
 
 /// A parsed CIDR network range (IPv4 or IPv6).
