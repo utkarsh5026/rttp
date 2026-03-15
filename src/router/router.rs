@@ -54,7 +54,10 @@ pub struct RouteBuilder<'a> {
 
 impl<'a> RouteBuilder<'a> {
     pub(super) fn new(router: &'a mut Router, path: &str) -> Self {
-        Self { router, path: path.to_string() }
+        Self {
+            router,
+            path: path.to_string(),
+        }
     }
 
     fn add(self, method: Method, handler: impl IntoRouteConfig) -> Self {
@@ -63,33 +66,50 @@ impl<'a> RouteBuilder<'a> {
     }
 
     /// Register a `GET` handler on this path.
-    pub fn get(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Get, handler) }
+    pub fn get(self, handler: impl IntoRouteConfig) -> Self {
+        self.add(Method::Get, handler)
+    }
 
     /// Register a `POST` handler on this path.
-    pub fn post(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Post, handler) }
+    pub fn post(self, handler: impl IntoRouteConfig) -> Self {
+        self.add(Method::Post, handler)
+    }
 
     /// Register a `PUT` handler on this path.
-    pub fn put(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Put, handler) }
+    pub fn put(self, handler: impl IntoRouteConfig) -> Self {
+        self.add(Method::Put, handler)
+    }
 
     /// Register a `DELETE` handler on this path.
-    pub fn delete(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Delete, handler) }
+    pub fn delete(self, handler: impl IntoRouteConfig) -> Self {
+        self.add(Method::Delete, handler)
+    }
 
     /// Register a `PATCH` handler on this path.
-    pub fn patch(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Patch, handler) }
+    pub fn patch(self, handler: impl IntoRouteConfig) -> Self {
+        self.add(Method::Patch, handler)
+    }
 
     /// Register an `OPTIONS` handler on this path.
-    pub fn options(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Options, handler) }
+    pub fn options(self, handler: impl IntoRouteConfig) -> Self {
+        self.add(Method::Options, handler)
+    }
 
     /// Register a `HEAD` handler on this path.
-    pub fn head(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Head, handler) }
+    pub fn head(self, handler: impl IntoRouteConfig) -> Self {
+        self.add(Method::Head, handler)
+    }
 
     /// Register a `TRACE` handler on this path.
-    pub fn trace(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Trace, handler) }
+    pub fn trace(self, handler: impl IntoRouteConfig) -> Self {
+        self.add(Method::Trace, handler)
+    }
 
     /// Register a `CONNECT` handler on this path.
-    pub fn connect(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Connect, handler) }
+    pub fn connect(self, handler: impl IntoRouteConfig) -> Self {
+        self.add(Method::Connect, handler)
+    }
 }
-
 
 /// HTTP request router that dispatches requests to registered handler functions.
 ///
@@ -135,7 +155,11 @@ impl Router {
     /// assert!(router.is_empty());
     /// ```
     pub fn new() -> Self {
-        Self { routes: Vec::new(), prefix: String::new(), name: None }
+        Self {
+            routes: Vec::new(),
+            prefix: String::new(),
+            name: None,
+        }
     }
 
     /// Create a router whose routes are all automatically prefixed with `prefix`.
@@ -190,11 +214,43 @@ impl Router {
     }
 
     /// Return this router's name, if one was set with [`named`](Self::named).
+    ///
+    /// # Returns
+    ///
+    /// `Some(&str)` containing the name, or `None` if no name was set.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rttp::Router;
+    ///
+    /// let named = Router::scoped("/users").named("Users");
+    /// assert_eq!(named.name(), Some("Users"));
+    ///
+    /// let anonymous = Router::new();
+    /// assert_eq!(anonymous.name(), None);
+    /// ```
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
     }
 
     /// Return this router's base prefix, if one was set with [`scoped`](Self::scoped).
+    ///
+    /// # Returns
+    ///
+    /// The prefix string (e.g. `"/api/v1"`), or an empty string `""` for a plain `Router::new()`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rttp::Router;
+    ///
+    /// let scoped = Router::scoped("/api/v1");
+    /// assert_eq!(scoped.prefix(), "/api/v1");
+    ///
+    /// let plain = Router::new();
+    /// assert_eq!(plain.prefix(), "");
+    /// ```
     pub fn prefix(&self) -> &str {
         &self.prefix
     }
@@ -208,7 +264,8 @@ impl Router {
         } else {
             format!("{}{}", self.prefix, path)
         };
-        self.routes.push(Route::new(method, &full, handler.into_route_fn()));
+        self.routes
+            .push(Route::new(method, &full, handler.into_route_fn()));
     }
 
     /// Register a handler for `GET` requests matching `path`.
@@ -402,7 +459,6 @@ impl Router {
         RouteBuilder::new(self, path)
     }
 
-
     /// Register a route with a pre-built [`HandlerFn`].
     ///
     /// This is used internally by [`App`](crate::app::App) to register
@@ -469,7 +525,8 @@ impl Router {
         let prefix = prefix.trim_end_matches('/');
         for route in other.routes {
             let new_pattern = format!("{}{}", prefix, route.pattern_str);
-            self.routes.push(Route::new(route.method, &new_pattern, route.handler));
+            self.routes
+                .push(Route::new(route.method, &new_pattern, route.handler));
         }
     }
 
@@ -507,7 +564,9 @@ impl Router {
     /// assert_eq!(routes.len(), 2);
     /// ```
     pub fn routes(&self) -> impl Iterator<Item = (&Method, &str)> {
-        self.routes.iter().map(|r| (&r.method, r.pattern_str.as_str()))
+        self.routes
+            .iter()
+            .map(|r| (&r.method, r.pattern_str.as_str()))
     }
 
     /// Return `true` if no routes have been registered.
@@ -564,20 +623,18 @@ impl Router {
     ///
     /// Returns `404 Not Found` when no route matches.
     pub async fn dispatch(&self, mut ctx: Context) -> Response {
-        let path = ctx.request().path().to_owned();
-        let method = ctx.request().method().clone();
-
         for route in &self.routes {
-            if let Some(params) = route.matches(&method, &path) {
+            let (method, path) = (ctx.request().method(), ctx.request().path());
+            if let Some(params) = route.matches(method, path) {
                 *ctx.params_mut() = params;
                 return (route.handler)(ctx).await;
             }
         }
 
         // RFC 9110 §9.3.2: HEAD auto-fallback to GET.
-        if method == Method::Head {
+        if ctx.request().method() == &Method::Head {
             for route in &self.routes {
-                if let Some(params) = route.matches(&Method::Get, &path) {
+                if let Some(params) = route.matches(&Method::Get, ctx.request().path()) {
                     *ctx.params_mut() = params;
                     let mut response = (route.handler)(ctx).await;
                     response.strip_body();
@@ -586,16 +643,18 @@ impl Router {
             }
         }
 
-        self.fallback_response(&path, &method)
-    }
+        let path = ctx.request().path();
+        let method = ctx.request().method();
 
-    /// Builds the fallback response when no route matched the incoming method.
-    ///
-    /// - Returns `404 Not Found` when the path is not registered at all.
-    /// - Returns `200 OK` with an `Allow` header for `OPTIONS` requests (CORS preflight).
-    /// - Returns `405 Method Not Allowed` with an `Allow` header otherwise.
-    fn fallback_response(&self, path: &str, method: &Method) -> Response {
-        let allowed = self.allowed_methods(path);
+        let mut allowed: Vec<String> = self
+            .routes
+            .iter()
+            .filter(|r| r.pattern.matches(path).is_some())
+            .map(|r| r.method.to_string())
+            .collect();
+        allowed.sort_unstable();
+        allowed.dedup();
+
         if allowed.is_empty() {
             return Response::new(StatusCode::NotFound);
         }
@@ -607,20 +666,6 @@ impl Router {
         }
 
         Response::new(StatusCode::MethodNotAllowed).header("Allow", allow_value)
-    }
-
-    /// Returns a sorted list of HTTP method names registered for the given path,
-    /// by checking all routes whose pattern matches `path` regardless of method.
-    fn allowed_methods(&self, path: &str) -> Vec<String> {
-        let mut methods: Vec<String> = self
-            .routes
-            .iter()
-            .filter(|r| r.pattern.matches(path).is_some())
-            .map(|r| r.method.to_string())
-            .collect();
-        methods.sort_unstable();
-        methods.dedup();
-        methods
     }
 }
 
@@ -639,7 +684,9 @@ mod tests {
     fn routes_iterator_returns_method_and_path_pairs() {
         let mut router = Router::new();
         router.get("/users", |_ctx| async { Response::new(StatusCode::Ok) });
-        router.post("/users", |_ctx| async { Response::new(StatusCode::Created) });
+        router.post("/users", |_ctx| async {
+            Response::new(StatusCode::Created)
+        });
         router.delete("/users/:id", |_ctx| async { Response::new(StatusCode::Ok) });
 
         let routes: Vec<_> = router.routes().collect();
@@ -703,7 +750,9 @@ mod tests {
     #[tokio::test]
     async fn router_post_matches() {
         let mut router = Router::new();
-        router.post("/submit", |_ctx| async { Response::new(StatusCode::Created) });
+        router.post("/submit", |_ctx| async {
+            Response::new(StatusCode::Created)
+        });
         let res = router.handle(make_request("POST", "/submit")).await;
         assert_eq!(res.status(), StatusCode::Created);
     }
@@ -720,7 +769,9 @@ mod tests {
     async fn router_first_matching_route_wins() {
         let mut router = Router::new();
         router.get("/path", |_ctx| async { Response::new(StatusCode::Ok) });
-        router.get("/path", |_ctx| async { Response::new(StatusCode::Accepted) });
+        router.get("/path", |_ctx| async {
+            Response::new(StatusCode::Accepted)
+        });
 
         let res = router.handle(make_request("GET", "/path")).await;
         assert_eq!(res.status(), StatusCode::Ok);
@@ -741,7 +792,9 @@ mod tests {
     async fn router_wildcard_route_matches() {
         let mut router = Router::new();
         router.get("/files/*", |_ctx| async { Response::new(StatusCode::Ok) });
-        let res = router.handle(make_request("GET", "/files/docs/readme.txt")).await;
+        let res = router
+            .handle(make_request("GET", "/files/docs/readme.txt"))
+            .await;
         assert_eq!(res.status(), StatusCode::Ok);
     }
 
@@ -753,10 +806,22 @@ mod tests {
         router.patch("/r", |_ctx| async { Response::new(StatusCode::Ok) });
         router.options("/r", |_ctx| async { Response::new(StatusCode::Ok) });
         assert_eq!(router.len(), 4);
-        assert_eq!(router.handle(make_request("PUT", "/r")).await.status(), StatusCode::Ok);
-        assert_eq!(router.handle(make_request("DELETE", "/r")).await.status(), StatusCode::Ok);
-        assert_eq!(router.handle(make_request("PATCH", "/r")).await.status(), StatusCode::Ok);
-        assert_eq!(router.handle(make_request("OPTIONS", "/r")).await.status(), StatusCode::Ok);
+        assert_eq!(
+            router.handle(make_request("PUT", "/r")).await.status(),
+            StatusCode::Ok
+        );
+        assert_eq!(
+            router.handle(make_request("DELETE", "/r")).await.status(),
+            StatusCode::Ok
+        );
+        assert_eq!(
+            router.handle(make_request("PATCH", "/r")).await.status(),
+            StatusCode::Ok
+        );
+        assert_eq!(
+            router.handle(make_request("OPTIONS", "/r")).await.status(),
+            StatusCode::Ok
+        );
     }
 
     #[tokio::test]
@@ -770,11 +835,17 @@ mod tests {
 
         assert_eq!(router.len(), 2);
         assert_eq!(
-            router.handle(make_request("GET", "/api/v1/users")).await.status(),
+            router
+                .handle(make_request("GET", "/api/v1/users"))
+                .await
+                .status(),
             StatusCode::Ok
         );
         assert_eq!(
-            router.handle(make_request("GET", "/api/v1/users/42")).await.status(),
+            router
+                .handle(make_request("GET", "/api/v1/users/42"))
+                .await
+                .status(),
             StatusCode::Ok
         );
         assert_eq!(
@@ -792,7 +863,10 @@ mod tests {
         router.nest("/api/", sub);
 
         assert_eq!(
-            router.handle(make_request("GET", "/api/ping")).await.status(),
+            router
+                .handle(make_request("GET", "/api/ping"))
+                .await
+                .status(),
             StatusCode::Ok
         );
     }
@@ -800,14 +874,19 @@ mod tests {
     #[tokio::test]
     async fn router_nest_existing_routes_retain_priority() {
         let mut sub = Router::new();
-        sub.get("/path", |_ctx| async { Response::new(StatusCode::Accepted) });
+        sub.get("/path", |_ctx| async {
+            Response::new(StatusCode::Accepted)
+        });
 
         let mut router = Router::new();
         router.get("/v1/path", |_ctx| async { Response::new(StatusCode::Ok) });
         router.nest("/v1", sub);
 
         assert_eq!(
-            router.handle(make_request("GET", "/v1/path")).await.status(),
+            router
+                .handle(make_request("GET", "/v1/path"))
+                .await
+                .status(),
             StatusCode::Ok
         );
     }
@@ -824,7 +903,9 @@ mod tests {
         root.nest("/api", mid);
 
         assert_eq!(
-            root.handle(make_request("GET", "/api/v1/items")).await.status(),
+            root.handle(make_request("GET", "/api/v1/items"))
+                .await
+                .status(),
             StatusCode::Ok
         );
     }
@@ -835,9 +916,18 @@ mod tests {
         router.head("/r", |_ctx| async { Response::new(StatusCode::Ok) });
         router.trace("/r", |_ctx| async { Response::new(StatusCode::Ok) });
         router.connect("/r", |_ctx| async { Response::new(StatusCode::Ok) });
-        assert_eq!(router.handle(make_request("HEAD", "/r")).await.status(), StatusCode::Ok);
-        assert_eq!(router.handle(make_request("TRACE", "/r")).await.status(), StatusCode::Ok);
-        assert_eq!(router.handle(make_request("CONNECT", "/r")).await.status(), StatusCode::Ok);
+        assert_eq!(
+            router.handle(make_request("HEAD", "/r")).await.status(),
+            StatusCode::Ok
+        );
+        assert_eq!(
+            router.handle(make_request("TRACE", "/r")).await.status(),
+            StatusCode::Ok
+        );
+        assert_eq!(
+            router.handle(make_request("CONNECT", "/r")).await.status(),
+            StatusCode::Ok
+        );
     }
 
     #[tokio::test]
@@ -849,7 +939,10 @@ mod tests {
             .post(|_ctx| async { Response::new(StatusCode::Created) });
 
         assert_eq!(router.len(), 2);
-        assert_eq!(router.handle(make_request("GET", "/users")).await.status(), StatusCode::Ok);
+        assert_eq!(
+            router.handle(make_request("GET", "/users")).await.status(),
+            StatusCode::Ok
+        );
         assert_eq!(
             router.handle(make_request("POST", "/users")).await.status(),
             StatusCode::Created
@@ -859,10 +952,15 @@ mod tests {
     #[tokio::test]
     async fn route_builder_unregistered_method_returns_405() {
         let mut router = Router::new();
-        router.route("/items").get(|_ctx| async { Response::new(StatusCode::Ok) });
+        router
+            .route("/items")
+            .get(|_ctx| async { Response::new(StatusCode::Ok) });
 
         assert_eq!(
-            router.handle(make_request("DELETE", "/items")).await.status(),
+            router
+                .handle(make_request("DELETE", "/items"))
+                .await
+                .status(),
             StatusCode::MethodNotAllowed
         );
     }
@@ -877,17 +975,21 @@ mod tests {
         let res = router.handle(make_request("HEAD", "/data")).await;
         assert_eq!(res.status(), StatusCode::Ok);
         // Body must be stripped; headers (Content-Length) are preserved by the GET handler logic.
-        assert!(res.headers().get("content-length").is_none() || {
-            // The GET handler ran; strip_body clears the vec before into_bytes, so
-            // content-length will be written as 0 by into_bytes — acceptable either way.
-            true
-        });
+        assert!(
+            res.headers().get("content-length").is_none() || {
+                // The GET handler ran; strip_body clears the vec before into_bytes, so
+                // content-length will be written as 0 by into_bytes — acceptable either way.
+                true
+            }
+        );
     }
 
     #[tokio::test]
     async fn head_explicit_handler_takes_priority_over_get_fallback() {
         let mut router = Router::new();
-        router.get("/ping", |_ctx| async { Response::new(StatusCode::Ok).body("body") });
+        router.get("/ping", |_ctx| async {
+            Response::new(StatusCode::Ok).body("body")
+        });
         router.head("/ping", |_ctx| async {
             Response::new(StatusCode::NoContent)
         });
@@ -904,7 +1006,10 @@ mod tests {
 
         let res = router.handle(make_request("POST", "/hello")).await;
         assert_eq!(res.status(), StatusCode::MethodNotAllowed);
-        assert!(res.headers().get("allow").is_some(), "Allow header must be present");
+        assert!(
+            res.headers().get("allow").is_some(),
+            "Allow header must be present"
+        );
         let allow = res.headers().get("allow").unwrap();
         assert!(allow.contains("GET"), "Allow header must list GET");
     }
@@ -913,11 +1018,16 @@ mod tests {
     async fn options_auto_response_when_no_explicit_handler() {
         let mut router = Router::new();
         router.get("/hello", |_ctx| async { Response::new(StatusCode::Ok) });
-        router.post("/hello", |_ctx| async { Response::new(StatusCode::Created) });
+        router.post("/hello", |_ctx| async {
+            Response::new(StatusCode::Created)
+        });
 
         let res = router.handle(make_request("OPTIONS", "/hello")).await;
         assert_eq!(res.status(), StatusCode::Ok);
-        let allow = res.headers().get("allow").expect("Allow header must be present");
+        let allow = res
+            .headers()
+            .get("allow")
+            .expect("Allow header must be present");
         assert!(allow.contains("GET"));
         assert!(allow.contains("POST"));
     }
@@ -926,7 +1036,9 @@ mod tests {
     async fn options_explicit_handler_takes_priority() {
         let mut router = Router::new();
         router.get("/hello", |_ctx| async { Response::new(StatusCode::Ok) });
-        router.options("/hello", |_ctx| async { Response::new(StatusCode::NoContent) });
+        router.options("/hello", |_ctx| async {
+            Response::new(StatusCode::NoContent)
+        });
 
         let res = router.handle(make_request("OPTIONS", "/hello")).await;
         assert_eq!(res.status(), StatusCode::NoContent);
@@ -968,17 +1080,40 @@ mod tests {
     async fn scoped_router_prepends_prefix_on_merge() {
         let mut users = Router::scoped("/api/v1");
         users.get("/users", |_ctx| async { Response::new(StatusCode::Ok) });
-        users.post("/users", |_ctx| async { Response::new(StatusCode::Created) });
+        users.post("/users", |_ctx| async {
+            Response::new(StatusCode::Created)
+        });
         users.delete("/users/:id", |_ctx| async { Response::new(StatusCode::Ok) });
 
         let mut router = Router::new();
         router.merge(users);
 
         assert_eq!(router.len(), 3);
-        assert_eq!(router.handle(make_request("GET", "/api/v1/users")).await.status(), StatusCode::Ok);
-        assert_eq!(router.handle(make_request("POST", "/api/v1/users")).await.status(), StatusCode::Created);
-        assert_eq!(router.handle(make_request("DELETE", "/api/v1/users/42")).await.status(), StatusCode::Ok);
-        assert_eq!(router.handle(make_request("GET", "/users")).await.status(), StatusCode::NotFound);
+        assert_eq!(
+            router
+                .handle(make_request("GET", "/api/v1/users"))
+                .await
+                .status(),
+            StatusCode::Ok
+        );
+        assert_eq!(
+            router
+                .handle(make_request("POST", "/api/v1/users"))
+                .await
+                .status(),
+            StatusCode::Created
+        );
+        assert_eq!(
+            router
+                .handle(make_request("DELETE", "/api/v1/users/42"))
+                .await
+                .status(),
+            StatusCode::Ok
+        );
+        assert_eq!(
+            router.handle(make_request("GET", "/users")).await.status(),
+            StatusCode::NotFound
+        );
     }
 
     #[tokio::test]
@@ -989,7 +1124,13 @@ mod tests {
         let mut router = Router::new();
         router.merge(sub);
 
-        assert_eq!(router.handle(make_request("GET", "/api/ping")).await.status(), StatusCode::Ok);
+        assert_eq!(
+            router
+                .handle(make_request("GET", "/api/ping"))
+                .await
+                .status(),
+            StatusCode::Ok
+        );
     }
 
     #[tokio::test]
@@ -1001,8 +1142,20 @@ mod tests {
         let mut router = Router::new();
         router.nest("/api/v1", users);
 
-        assert_eq!(router.handle(make_request("GET", "/api/v1/users")).await.status(), StatusCode::Ok);
-        assert_eq!(router.handle(make_request("GET", "/api/v1/users/42")).await.status(), StatusCode::Ok);
+        assert_eq!(
+            router
+                .handle(make_request("GET", "/api/v1/users"))
+                .await
+                .status(),
+            StatusCode::Ok
+        );
+        assert_eq!(
+            router
+                .handle(make_request("GET", "/api/v1/users/42"))
+                .await
+                .status(),
+            StatusCode::Ok
+        );
     }
 
     #[test]
