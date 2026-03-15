@@ -2,6 +2,7 @@
 
 use crate::context::{Context, PathParams};
 use crate::extract::HandlerFn;
+use crate::middleware::{IntoMiddlewareHandler, MiddlewareHandler, wrap_with_middlewares};
 use crate::router::handler::IntoRouteConfig;
 use crate::router::pattern::Pattern;
 use crate::{Method, Request, Response, StatusCode};
@@ -36,20 +37,27 @@ impl Route {
 
 /// A path-scoped builder returned by [`Router::route`].
 ///
-/// Lets you register multiple HTTP methods on the same path without repeating the path string:
+/// Lets you register multiple HTTP methods on the same path without repeating the path
+/// string. Middleware attached via [`.middleware()`](Self::middleware) or
+/// [`.middlewares()`](Self::middlewares) is applied to every handler registered on
+/// this builder.
 ///
 /// ```rust,no_run
+/// use std::sync::Arc;
 /// use rttp::{Router, Response, StatusCode};
+/// use rttp::middleware::{LoggerMiddleware};
 ///
 /// let mut router = Router::new();
 /// router
 ///     .route("/users")
+///     .middleware(Arc::new(LoggerMiddleware))
 ///     .get(|_ctx| async { Response::new(StatusCode::Ok) })
 ///     .post(|_ctx| async { Response::new(StatusCode::Created) });
 /// ```
 pub struct RouteBuilder<'a> {
     router: &'a mut Router,
     path: String,
+    middlewares: Vec<MiddlewareHandler>,
 }
 
 impl<'a> RouteBuilder<'a> {
@@ -57,11 +65,57 @@ impl<'a> RouteBuilder<'a> {
         Self {
             router,
             path: path.to_string(),
+            middlewares: Vec::new(),
         }
     }
 
     fn add(self, method: Method, handler: impl IntoRouteConfig) -> Self {
-        self.router.register(method, &self.path, handler);
+        let handler_fn = wrap_with_middlewares(handler.into_route_fn(), &self.middlewares);
+        self.router.register_fn(method, &self.path, handler_fn);
+        self
+    }
+
+    /// Attach a single middleware to all handlers on this path.
+    ///
+    /// Middleware is applied in the order it is added: the first call wraps outermost,
+    /// the last call wraps closest to the handler. Can be chained multiple times.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use std::sync::Arc;
+    /// use rttp::{Router, Response, StatusCode};
+    /// use rttp::middleware::LoggerMiddleware;
+    ///
+    /// let mut router = Router::new();
+    /// router.route("/users")
+    ///     .middleware(Arc::new(LoggerMiddleware))
+    ///     .get(|_ctx| async { Response::new(StatusCode::Ok) });
+    /// ```
+    pub fn middleware(mut self, mw: impl IntoMiddlewareHandler) -> Self {
+        self.middlewares.push(mw.into_middleware_handler());
+        self
+    }
+
+    /// Attach a batch of middlewares to all handlers on this path.
+    ///
+    /// Accepts a `Vec<MiddlewareHandler>` — typically produced by the [`middlewares!`] macro.
+    /// Middlewares are appended in order after any previously attached middleware.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use std::sync::Arc;
+    /// use rttp::{Router, Response, StatusCode, middlewares};
+    /// use rttp::middleware::LoggerMiddleware;
+    ///
+    /// let mut router = Router::new();
+    /// router.route("/users")
+    ///     .middlewares(middlewares![Arc::new(LoggerMiddleware)])
+    ///     .get(|_ctx| async { Response::new(StatusCode::Ok) });
+    /// ```
+    pub fn middlewares(mut self, mws: Vec<MiddlewareHandler>) -> Self {
+        self.middlewares.extend(mws);
         self
     }
 
@@ -135,6 +189,7 @@ pub struct Router {
     pub(super) routes: Vec<Route>,
     prefix: String,
     name: Option<String>,
+    middlewares: Vec<MiddlewareHandler>,
 }
 
 impl Default for Router {
@@ -159,6 +214,7 @@ impl Router {
             routes: Vec::new(),
             prefix: String::new(),
             name: None,
+            middlewares: Vec::new(),
         }
     }
 
@@ -189,6 +245,7 @@ impl Router {
             routes: Vec::new(),
             prefix: prefix.trim_end_matches('/').to_string(),
             name: None,
+            middlewares: Vec::new(),
         }
     }
 
@@ -255,17 +312,68 @@ impl Router {
         &self.prefix
     }
 
-    /// Low-level route registration used by all public method helpers (`get`, `post`, …).
+    /// Attach a single middleware to every route registered on this router.
     ///
-    /// Prepends this router's prefix (if any) before storing the route.
-    fn register(&mut self, method: Method, path: &str, handler: impl IntoRouteConfig) {
+    /// Router-level middleware runs before any route-level middleware. Call this
+    /// before registering routes so the middleware is applied to all of them.
+    /// Middleware is applied in the order it is added.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use std::sync::Arc;
+    /// use rttp::{Router, Response, StatusCode};
+    /// use rttp::middleware::LoggerMiddleware;
+    ///
+    /// let mut router = Router::new();
+    /// router.middleware(Arc::new(LoggerMiddleware));
+    /// router.get("/users", |_ctx| async { Response::new(StatusCode::Ok) });
+    /// ```
+    pub fn middleware(&mut self, mw: impl IntoMiddlewareHandler) -> &mut Self {
+        self.middlewares.push(mw.into_middleware_handler());
+        self
+    }
+
+    /// Attach a batch of middlewares to every route registered on this router.
+    ///
+    /// Accepts a `Vec<MiddlewareHandler>` — typically produced by the [`middlewares!`] macro.
+    /// Appended in order after any previously attached router-level middleware.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use std::sync::Arc;
+    /// use rttp::{Router, Response, StatusCode, middlewares};
+    /// use rttp::middleware::LoggerMiddleware;
+    ///
+    /// let mut router = Router::new();
+    /// router.middlewares(middlewares![Arc::new(LoggerMiddleware)]);
+    /// router.get("/users", |_ctx| async { Response::new(StatusCode::Ok) });
+    /// ```
+    pub fn middlewares(&mut self, mws: Vec<MiddlewareHandler>) -> &mut Self {
+        self.middlewares.extend(mws);
+        self
+    }
+
+    /// Low-level registration from a pre-built [`HandlerFn`].
+    ///
+    /// Prepends this router's prefix and wraps with router-level middleware.
+    /// Used by [`RouteBuilder::add`] (which has already applied route-level middleware).
+    fn register_fn(&mut self, method: Method, path: &str, handler: HandlerFn) {
         let full = if self.prefix.is_empty() {
             path.to_string()
         } else {
             format!("{}{}", self.prefix, path)
         };
-        self.routes
-            .push(Route::new(method, &full, handler.into_route_fn()));
+        let wrapped = wrap_with_middlewares(handler, &self.middlewares);
+        self.routes.push(Route::new(method, &full, wrapped));
+    }
+
+    /// Low-level route registration used by all public method helpers (`get`, `post`, …).
+    ///
+    /// Converts the handler via [`IntoRouteConfig`], then delegates to [`register_fn`](Self::register_fn).
+    fn register(&mut self, method: Method, path: &str, handler: impl IntoRouteConfig) {
+        self.register_fn(method, path, handler.into_route_fn());
     }
 
     /// Register a handler for `GET` requests matching `path`.
@@ -464,7 +572,7 @@ impl Router {
     /// This is used internally by [`App`](crate::app::App) to register
     /// extractor-based handlers that have already been converted.
     pub(crate) fn add_raw_route(&mut self, method: Method, path: &str, handler: HandlerFn) {
-        self.routes.push(Route::new(method, path, handler));
+        self.register_fn(method, path, handler);
     }
 
     /// Merge all routes from `other` into this router.
@@ -1179,5 +1287,105 @@ mod tests {
         let router = Router::new();
         assert_eq!(router.prefix(), "");
         assert_eq!(router.name(), None);
+    }
+
+    use crate::middleware::{MiddlewareHandler, Next};
+    use std::sync::{Arc, Mutex};
+
+    fn tracking_middleware(
+        log: Arc<Mutex<Vec<&'static str>>>,
+        tag: &'static str,
+    ) -> MiddlewareHandler {
+        Arc::new(move |ctx: Context, next: Next| {
+            let log = Arc::clone(&log);
+            Box::pin(async move {
+                log.lock().unwrap().push(tag);
+                next.run(ctx).await
+            })
+        })
+    }
+
+    #[tokio::test]
+    async fn route_builder_middleware_runs_before_handler() {
+        let log: Arc<Mutex<Vec<&'static str>>> = Arc::new(Mutex::new(Vec::new()));
+        let mut router = Router::new();
+        let log2 = Arc::clone(&log);
+        router
+            .route("/ping")
+            .middleware(tracking_middleware(Arc::clone(&log), "mw"))
+            .get(move |_ctx| {
+                let log = Arc::clone(&log2);
+                async move {
+                    log.lock().unwrap().push("handler");
+                    Response::new(StatusCode::Ok)
+                }
+            });
+
+        router.handle(make_request("GET", "/ping")).await;
+        assert_eq!(*log.lock().unwrap(), vec!["mw", "handler"]);
+    }
+
+    #[tokio::test]
+    async fn route_builder_middlewares_macro_runs_in_order() {
+        let log: Arc<Mutex<Vec<&'static str>>> = Arc::new(Mutex::new(Vec::new()));
+        let mut router = Router::new();
+        let log2 = Arc::clone(&log);
+        router
+            .route("/ping")
+            .middlewares(crate::middlewares![
+                tracking_middleware(Arc::clone(&log), "first"),
+                tracking_middleware(Arc::clone(&log), "second"),
+            ])
+            .get(move |_ctx| {
+                let log = Arc::clone(&log2);
+                async move {
+                    log.lock().unwrap().push("handler");
+                    Response::new(StatusCode::Ok)
+                }
+            });
+
+        router.handle(make_request("GET", "/ping")).await;
+        assert_eq!(*log.lock().unwrap(), vec!["first", "second", "handler"]);
+    }
+
+    #[tokio::test]
+    async fn router_middleware_applies_to_all_routes() {
+        let log: Arc<Mutex<Vec<&'static str>>> = Arc::new(Mutex::new(Vec::new()));
+        let mut router = Router::new();
+        router.middleware(tracking_middleware(Arc::clone(&log), "router-mw"));
+        router.get("/a", |_ctx| async { Response::new(StatusCode::Ok) });
+        router.get("/b", |_ctx| async { Response::new(StatusCode::Ok) });
+
+        router.handle(make_request("GET", "/a")).await;
+        router.handle(make_request("GET", "/b")).await;
+        assert_eq!(*log.lock().unwrap(), vec!["router-mw", "router-mw"]);
+    }
+
+    #[tokio::test]
+    async fn router_middleware_runs_before_route_middleware() {
+        let log: Arc<Mutex<Vec<&'static str>>> = Arc::new(Mutex::new(Vec::new()));
+        let mut router = Router::new();
+        router.middleware(tracking_middleware(Arc::clone(&log), "router"));
+        router
+            .route("/ping")
+            .middleware(tracking_middleware(Arc::clone(&log), "route"))
+            .get(|_ctx| async { Response::new(StatusCode::Ok) });
+
+        router.handle(make_request("GET", "/ping")).await;
+        assert_eq!(*log.lock().unwrap(), vec!["router", "route"]);
+    }
+
+    #[tokio::test]
+    async fn middleware_short_circuit_skips_handler() {
+        let mut router = Router::new();
+        router
+            .route("/secure")
+            .middleware(|_ctx: Context, _next: Next| -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>> {
+                Box::pin(async { Response::new(StatusCode::Unauthorized) })
+            })
+            .get(|_ctx| async { Response::new(StatusCode::Ok) });
+
+        let res = router.handle(make_request("GET", "/secure")).await;
+        assert_eq!(res.status(), StatusCode::Unauthorized);
     }
 }

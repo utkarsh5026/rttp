@@ -38,5 +38,6 @@ pub mod security;
 
 pub use app::App;
 pub use http::{Headers, Method, Request, Response, StatusCode};
+pub use middleware::IntoMiddlewareHandler;
 pub use router::Router;
 pub use server::{Server, ServerError};
