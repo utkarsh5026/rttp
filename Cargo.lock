@@ -1237,6 +1237,7 @@ dependencies = [
  "getrandom 0.4.2",
  "httparse",
  "jsonwebtoken",
+ "percent-encoding",
  "rand_core 0.6.4",
  "reqwest",
  "serde",
