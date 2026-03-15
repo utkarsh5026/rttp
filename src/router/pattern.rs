@@ -133,13 +133,13 @@ impl Pattern {
             }
             Pattern::Parameterized { segments } => {
                 let mut params = PathParams::new();
-                let path_segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+                let mut path_iter = path.split('/').filter(|s| !s.is_empty());
+                let mut matched = 0;
 
-                if segments.len() != path_segments.len() {
-                    return None;
-                }
-
-                for (seg, path_seg) in segments.iter().zip(path_segments) {
+                for seg in segments.iter() {
+                    let Some(path_seg) = path_iter.next() else {
+                        return None;
+                    };
                     match seg {
                         Segment::Static(s) => {
                             if s != path_seg {
@@ -150,6 +150,11 @@ impl Pattern {
                             params.insert(name.clone(), path_seg.to_string());
                         }
                     }
+                    matched += 1;
+                }
+
+                if matched != segments.len() || path_iter.next().is_some() {
+                    return None;
                 }
 
                 Some(params)

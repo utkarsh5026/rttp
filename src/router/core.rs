@@ -2,7 +2,7 @@
 
 use crate::context::{Context, PathParams};
 use crate::extract::HandlerFn;
-use crate::middleware::{wrap_with_middlewares, IntoMiddlewareHandler, MiddlewareHandler};
+use crate::middleware::{IntoMiddlewareHandler, MiddlewareHandler, wrap_with_middlewares};
 use crate::router::handler::IntoRouteConfig;
 use crate::router::pattern::Pattern;
 use crate::{Method, Request, Response, StatusCode};
