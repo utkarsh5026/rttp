@@ -1,0 +1,21 @@
+# Enforce Unix line endings for all text files
+* text=auto eol=lf
+
+# Rust source files — always LF
+*.rs text eol=lf
+
+# Config / script files — always LF
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.py   text eol=lf
+Makefile text eol=lf
+
+# Binaries — no line-ending conversion
+*.png  binary
+*.jpg  binary
+*.gif  binary
+*.ico  binary
+*.wasm binary
