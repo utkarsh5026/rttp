@@ -127,7 +127,7 @@ pub trait TokenBlocklist: Send + Sync {
 /// use std::{sync::Arc, time::{Duration, Instant}};
 /// use rttp::security::token::blocklist::{InMemoryBlocklist, TokenBlocklist};
 ///
-/// # tokio_test::block_on(async {
+/// # tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
 /// let bl = Arc::new(InMemoryBlocklist::new());
 /// let exp = Instant::now() + Duration::from_secs(3600);
 ///
