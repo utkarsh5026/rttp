@@ -65,6 +65,9 @@ uuid = { version = "1.22.0", features = ["v4", "fast-rng"] }
 
 # URL query string deserialization
 serde_urlencoded = "0.7"
+
+# Percent-encoding for URL decoding
+percent-encoding = "2"
 getrandom = "0.4.2"
 
 # Ergonomic async trait support
