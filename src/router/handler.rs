@@ -7,11 +7,11 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
+use crate::Response;
 use crate::context::Context;
 use crate::extract::HandlerFn;
 use crate::http::response::IntoResponse;
-use crate::middleware::{from_middleware, wrap_with_middlewares, Middleware, MiddlewareHandler};
-use crate::Response;
+use crate::middleware::{Middleware, MiddlewareHandler, from_middleware, wrap_with_middlewares};
 
 /// Conversion trait for async handler functions.
 ///
