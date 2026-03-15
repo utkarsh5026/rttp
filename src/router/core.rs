@@ -24,15 +24,6 @@ impl Route {
             handler,
         }
     }
-
-    // Returns `Some(params)` when both the HTTP method and path pattern match, `None` otherwise.
-    pub(super) fn matches(&self, method: &Method, path: &str) -> Option<PathParams> {
-        if &self.method == method {
-            self.pattern.matches(path)
-        } else {
-            None
-        }
-    }
 }
 
 /// A path-scoped builder returned by [`Router::route`].
@@ -730,49 +721,102 @@ impl Router {
 
     /// Dispatch a pre-built [`Context`] to the first matching route.
     ///
-    /// Unlike [`route`](Self::route), this method receives an existing `Context`
-    /// (with extensions already populated by middleware) and merges in the
-    /// extracted path parameters before calling the handler.
+    /// This is the low-level entry point used by [`handle`](Self::handle) and by
+    /// [`App`](crate::app::App) when middleware has already constructed a `Context`.
+    /// Unlike [`handle`](Self::handle), which creates a fresh `Context` from a `Request`,
+    /// this method accepts an existing `Context` so that extensions populated upstream
+    /// (e.g. authenticated user, request-id) are preserved when the handler runs.
     ///
-    /// Returns `404 Not Found` when no route matches.
+    /// # Dispatch rules
+    ///
+    /// Routes are tested in registration order. The first route whose HTTP method **and**
+    /// path pattern both match wins and its path parameters are merged into `ctx`.
+    ///
+    /// When no route matches, the following fallbacks apply in order:
+    ///
+    /// 1. **HEAD → GET fallback** (RFC 9110 §9.3.2): if the method is `HEAD` and a `GET`
+    ///    handler exists for the same path, that handler is called and the response body
+    ///    is stripped before returning.
+    /// 2. **405 Method Not Allowed**: if the path matches at least one route but none with
+    ///    the requested method, a `405` response is returned with an `Allow` header listing
+    ///    every method registered for that path.
+    /// 3. **404 Not Found**: if no route matches the path at all.
+    ///
+    /// # Arguments
+    ///
+    /// - `ctx` — The incoming request context, optionally pre-populated with extensions.
+    ///
+    /// # Returns
+    ///
+    /// The [`Response`] produced by the matching handler, or an automatic `404`, `405`, or
+    /// HEAD-fallback response as described above.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use rttp::{Router, Response, StatusCode};
+    /// use rttp::context::Context;
+    ///
+    /// # async fn example(request: rttp::Request) {
+    /// let mut router = Router::new();
+    /// router.get("/ping", |_ctx| async { Response::new(StatusCode::Ok) });
+    ///
+    /// // Basic dispatch via handle (builds Context internally).
+    /// let response = router.handle(request).await;
+    /// assert_eq!(response.status(), StatusCode::Ok);
+    /// # }
+    /// ```
+    ///
+    /// ```rust,no_run
+    /// use rttp::{Router, Response, StatusCode};
+    /// use rttp::context::Context;
+    ///
+    /// # async fn example(request: rttp::Request) {
+    /// let mut router = Router::new();
+    /// router.get("/ping", |_ctx| async { Response::new(StatusCode::Ok) });
+    ///
+    /// // Dispatch a pre-built Context (e.g. with extensions already set).
+    /// let ctx = Context::new(request);
+    /// let response = router.dispatch(ctx).await;
+    /// assert_eq!(response.status(), StatusCode::Ok);
+    /// # }
+    /// ```
     pub async fn dispatch(&self, mut ctx: Context) -> Response {
-        // Hoist outside the loop — avoids repeated accessor calls per iteration.
         let (method, path) = (ctx.request().method(), ctx.request().path());
-        for route in &self.routes {
-            if let Some(params) = route.matches(method, path) {
-                *ctx.params_mut() = params;
-                return (route.handler)(ctx).await;
-            }
-        }
+        let is_head = method == &Method::Head;
 
-        // RFC 9110 §9.3.2: HEAD auto-fallback to GET.
-        if ctx.request().method() == &Method::Head {
-            for route in &self.routes {
-                if let Some(params) = route.matches(&Method::Get, ctx.request().path()) {
+        let mut head_fallback: Option<(&Route, PathParams)> = None;
+        let mut allowed: Vec<String> = Vec::new();
+
+        for route in &self.routes {
+            if let Some(params) = route.pattern.matches(path) {
+                if &route.method == method {
                     *ctx.params_mut() = params;
-                    let mut response = (route.handler)(ctx).await;
-                    response.strip_body();
-                    return response;
+                    return (route.handler)(ctx).await;
+                }
+
+                allowed.push(route.method.to_string());
+
+                // RFC 9110 §9.3.2: remember the first GET as a HEAD fallback.
+                if is_head && route.method == Method::Get && head_fallback.is_none() {
+                    head_fallback = Some((route, params));
                 }
             }
         }
 
-        let path = ctx.request().path();
-        let method = ctx.request().method();
-
-        let mut allowed: Vec<String> = self
-            .routes
-            .iter()
-            .filter(|r| r.pattern.matches(path).is_some())
-            .map(|r| r.method.to_string())
-            .collect();
-        allowed.sort_unstable();
-        allowed.dedup();
+        if let Some((route, params)) = head_fallback {
+            *ctx.params_mut() = params;
+            let mut response = (route.handler)(ctx).await;
+            response.strip_body();
+            return response;
+        }
 
         if allowed.is_empty() {
             return Response::new(StatusCode::NotFound);
         }
 
+        allowed.sort_unstable();
+        allowed.dedup();
         let allow_value = allowed.join(", ");
 
         if method == &Method::Options {
@@ -1386,9 +1430,13 @@ mod tests {
         let mut router = Router::new();
         router
             .route("/secure")
-            .middleware(|_ctx: Context, _next: Next| -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>> {
-                Box::pin(async { Response::new(StatusCode::Unauthorized) })
-            })
+            .middleware(
+                |_ctx: Context,
+                 _next: Next|
+                 -> std::pin::Pin<Box<dyn Future<Output = Response> + Send>> {
+                    Box::pin(async { Response::new(StatusCode::Unauthorized) })
+                },
+            )
             .get(|_ctx| async { Response::new(StatusCode::Ok) });
 
         let res = router.handle(make_request("GET", "/secure")).await;
