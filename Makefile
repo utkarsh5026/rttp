@@ -7,7 +7,7 @@
 
 PY := python
 
-.PHONY: all full build test lint fmt fmt-check check clean doc doc-build \
+.PHONY: all full build test doctest lint fmt fmt-check check clean doc doc-build \
         audit deny coverage run watch watch-test bacon ci help
 
 all: help
@@ -23,6 +23,9 @@ build:
 
 test:
 	@$(PY) makefile.py test
+
+doctest:
+	@$(PY) makefile.py doctest
 
 lint:
 	@$(PY) makefile.py lint

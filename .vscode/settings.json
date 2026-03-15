@@ -6,6 +6,7 @@
     "clippy",
     "codegen",
     "deadpool",
+    "doctest",
     "getrandom",
     "HMAC",
     "HSTS",
