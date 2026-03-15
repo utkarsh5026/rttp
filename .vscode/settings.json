@@ -1,19 +1,24 @@
 {
   "cSpell.words": [
+    "apikey",
     "Behaviour",
     "blocklist",
     "clippy",
     "codegen",
     "deadpool",
+    "getrandom",
     "HMAC",
     "HSTS",
     "httparse",
     "jsonwebtoken",
     "nosniff",
     "rttp",
+    "rustc",
+    "rustup",
     "safelisted",
     "SAMEORIGIN",
     "serde",
+    "splitn",
     "thiserror"
   ],
 
