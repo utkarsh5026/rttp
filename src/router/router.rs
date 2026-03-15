@@ -420,6 +420,27 @@ impl Router {
         self.routes.len()
     }
 
+    /// Return an iterator over all registered routes as `(method, path)` pairs.
+    ///
+    /// Useful for generating OpenAPI specs, logging registered routes at startup,
+    /// or asserting route registration in tests.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use rttp::{Router, Response, StatusCode};
+    ///
+    /// let mut router = Router::new();
+    /// router.get("/users", |_ctx| async { Response::new(StatusCode::Ok) });
+    /// router.post("/users", |_ctx| async { Response::new(StatusCode::Created) });
+    ///
+    /// let routes: Vec<_> = router.routes().collect();
+    /// assert_eq!(routes.len(), 2);
+    /// ```
+    pub fn routes(&self) -> impl Iterator<Item = (&Method, &str)> {
+        self.routes.iter().map(|r| (&r.method, r.pattern_str.as_str()))
+    }
+
     /// Return `true` if no routes have been registered.
     ///
     /// # Examples
@@ -540,6 +561,26 @@ mod tests {
         let raw = format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\n\r\n");
         let (req, _) = Request::parse(raw.as_bytes()).unwrap();
         req
+    }
+
+    #[test]
+    fn routes_iterator_returns_method_and_path_pairs() {
+        let mut router = Router::new();
+        router.get("/users", |_ctx| async { Response::new(StatusCode::Ok) });
+        router.post("/users", |_ctx| async { Response::new(StatusCode::Created) });
+        router.delete("/users/:id", |_ctx| async { Response::new(StatusCode::Ok) });
+
+        let routes: Vec<_> = router.routes().collect();
+        assert_eq!(routes.len(), 3);
+        assert!(routes.contains(&(&Method::Get, "/users")));
+        assert!(routes.contains(&(&Method::Post, "/users")));
+        assert!(routes.contains(&(&Method::Delete, "/users/:id")));
+    }
+
+    #[test]
+    fn routes_iterator_empty_on_new_router() {
+        let router = Router::new();
+        assert_eq!(router.routes().count(), 0);
     }
 
     #[test]
