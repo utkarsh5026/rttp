@@ -1,7 +1,7 @@
 //! Handler conversion traits for the router.
 //!
-//! [`IntoHandler`] abstracts over any async function that takes a [`Context`] and returns
-//! something that implements [`IntoResponse`]. [`IntoRouteConfig`] extends this to also
+//! [`IntoHandler`] abstracts over any async function that takes a [`crate::context::Context`] and returns
+//! something that implements [`crate::http::response::IntoResponse`]. [`IntoRouteConfig`] extends this to also
 //! accept tuples of `(Middleware..., Handler)` for per-route middleware.
 
 use std::pin::Pin;

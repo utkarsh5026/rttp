@@ -23,7 +23,7 @@ use super::bucket::{RateLimitConfig, TokenBucket};
 
 /// A synchronous, key-scoped token-bucket store.
 ///
-/// Each key (e.g. client IP, API key) gets its own [`TokenBucket`]. Implement
+/// Each key (e.g. client IP, API key) gets its own `TokenBucket`. Implement
 /// this trait to back the rate limiter with Redis, DynamoDB, or any other store.
 ///
 /// The trait is intentionally **synchronous** so it can be called inside
@@ -39,7 +39,7 @@ pub trait RateLimitStore: Send + Sync + 'static {
 
 /// In-process, in-memory [`RateLimitStore`] backed by a `Mutex<HashMap>`.
 ///
-/// Each key gets its own [`TokenBucket`] initialised on first access.
+/// Each key gets its own `TokenBucket` initialised on first access.
 /// Buckets are never evicted — for long-running servers with many ephemeral
 /// IPs, wire up a background task that calls [`InMemoryStore::evict_stale`].
 ///

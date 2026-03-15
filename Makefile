@@ -5,7 +5,7 @@
 #
 # Quick-install rich:  pip install rich
 
-PY := python
+PY := python3
 
 .PHONY: all full build test doctest lint fmt fmt-check check clean doc doc-build \
         audit deny coverage run watch watch-test bacon ci help

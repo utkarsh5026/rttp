@@ -9,7 +9,7 @@ use std::fmt;
 /// A single HTTP cookie with its optional attributes.
 ///
 /// Use the builder methods to set attributes, then convert to a `Set-Cookie`
-/// header value via [`Cookie::to_string`] or [`Cookie::into_header_value`].
+/// header value via `to_string()` or [`Cookie::into_header_value`].
 ///
 /// # Examples
 ///

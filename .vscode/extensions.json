@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "rust-lang.rust-analyzer",
+    "tamasfe.even-better-toml",
+    "serayuzgur.crates",
+    "usernamehw.errorlens",
+    "vadimcn.vscode-lldb",
+    "streetsidesoftware.code-spell-checker"
+  ]
+}
