@@ -13,9 +13,7 @@ use rttp::server::Server;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .init();
+    tracing_subscriber::fmt().with_env_filter("info").init();
 
     let app = App::new()
         .get("/", || async { "Hello, World!" })
