@@ -139,12 +139,10 @@ impl Middleware for RateLimitMiddleware {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use crate::{
         Response, StatusCode,
         context::Context,
-        middleware::{Middleware, Next},
+        middleware::Middleware,
         security::middleware::test_helpers::{make_context, ok_next, response_to_string},
         security::rate_limit::{RateLimitConfig, store::InMemoryStore},
     };

@@ -27,7 +27,7 @@ allow = [
     "Unicode-DFS-2016",
 ]
 # Warn on unlicensed crates rather than hard-failing (some sys crates omit it).
-unused_allowed_license = "warn"
+unused-allowed-license = "warn"
 
 # ── Bans ─────────────────────────────────────────────────────────────────────
 [bans]
