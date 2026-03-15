@@ -30,6 +30,7 @@ use pattern::Pattern;
 struct Route {
     method: Method,
     pattern: Pattern,
+    pattern_str: String,
     handler: HandlerFn,
 }
 
@@ -38,6 +39,7 @@ impl Route {
         Self {
             method,
             pattern: Pattern::parse(pattern),
+            pattern_str: pattern.to_string(),
             handler,
         }
     }
@@ -217,6 +219,69 @@ impl Router {
             .push(Route::new(Method::Patch, path, handler.into_route_fn()));
     }
 
+    /// Register a handler for `HEAD` requests matching `path`.
+    ///
+    /// `HEAD` is identical to `GET` but the server must not send a response body.
+    /// Ensure your handler returns a [`Response`] with no body set.
+    ///
+    /// # Arguments
+    ///
+    /// - `path` — URL pattern string (e.g. `"/users/:id"`).
+    /// - `handler` — Handler or `(middleware, …, handler)` tuple.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use rttp::{Router, Response, StatusCode};
+    ///
+    /// let mut router = Router::new();
+    /// router.head("/users/:id", |_ctx| async { Response::new(StatusCode::Ok) });
+    /// ```
+    pub fn head(&mut self, path: &str, handler: impl IntoRouteConfig) {
+        self.routes
+            .push(Route::new(Method::Head, path, handler.into_route_fn()));
+    }
+
+    /// Register a handler for `TRACE` requests matching `path`.
+    ///
+    /// # Arguments
+    ///
+    /// - `path` — URL pattern string.
+    /// - `handler` — Handler or `(middleware, …, handler)` tuple.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use rttp::{Router, Response, StatusCode};
+    ///
+    /// let mut router = Router::new();
+    /// router.trace("/echo", |_ctx| async { Response::new(StatusCode::Ok) });
+    /// ```
+    pub fn trace(&mut self, path: &str, handler: impl IntoRouteConfig) {
+        self.routes
+            .push(Route::new(Method::Trace, path, handler.into_route_fn()));
+    }
+
+    /// Register a handler for `CONNECT` requests matching `path`.
+    ///
+    /// # Arguments
+    ///
+    /// - `path` — URL pattern string.
+    /// - `handler` — Handler or `(middleware, …, handler)` tuple.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use rttp::{Router, Response, StatusCode};
+    ///
+    /// let mut router = Router::new();
+    /// router.connect("/tunnel", |_ctx| async { Response::new(StatusCode::Ok) });
+    /// ```
+    pub fn connect(&mut self, path: &str, handler: impl IntoRouteConfig) {
+        self.routes
+            .push(Route::new(Method::Connect, path, handler.into_route_fn()));
+    }
+
     /// Register a route with a pre-built [`HandlerFn`].
     ///
     /// This is used internally by [`App`](crate::app::App) to register
@@ -252,6 +317,39 @@ impl Router {
     /// ```
     pub fn merge(&mut self, other: Router) {
         self.routes.extend(other.routes);
+    }
+
+    /// Mount all routes from `other` under `prefix`, prepending it to every pattern.
+    ///
+    /// Unlike [`merge`](Self::merge), `nest` rewrites each child route's path by prepending
+    /// `prefix`, so a child route registered as `"/users"` becomes `"/api/users"` when nested
+    /// under `"/api"`. A trailing slash on `prefix` is stripped before concatenation.
+    ///
+    /// Routes from `other` are appended after this router's existing routes, so existing
+    /// routes retain priority on conflict.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use rttp::{Router, Response, StatusCode};
+    ///
+    /// fn user_routes() -> Router {
+    ///     let mut r = Router::new();
+    ///     r.get("/users", |_ctx| async { Response::new(StatusCode::Ok) });
+    ///     r.get("/users/:id", |_ctx| async { Response::new(StatusCode::Ok) });
+    ///     r
+    /// }
+    ///
+    /// let mut router = Router::new();
+    /// router.nest("/api/v1", user_routes());
+    /// // router now has: GET /api/v1/users, GET /api/v1/users/:id
+    /// ```
+    pub fn nest(&mut self, prefix: &str, other: Router) {
+        let prefix = prefix.trim_end_matches('/');
+        for route in other.routes {
+            let new_pattern = format!("{}{}", prefix, route.pattern_str);
+            self.routes.push(Route::new(route.method, &new_pattern, route.handler));
+        }
     }
 
     /// Return the number of routes registered in this router.
@@ -474,6 +572,96 @@ mod tests {
         );
         assert_eq!(
             router.route(make_request("OPTIONS", "/r")).await.status(),
+            StatusCode::Ok
+        );
+    }
+
+    #[tokio::test]
+    async fn router_nest_prepends_prefix() {
+        let mut sub = Router::new();
+        sub.get("/users", |_ctx| async { Response::new(StatusCode::Ok) });
+        sub.get("/users/:id", |_ctx| async { Response::new(StatusCode::Ok) });
+
+        let mut router = Router::new();
+        router.nest("/api/v1", sub);
+
+        assert_eq!(router.len(), 2);
+        assert_eq!(
+            router.route(make_request("GET", "/api/v1/users")).await.status(),
+            StatusCode::Ok
+        );
+        assert_eq!(
+            router.route(make_request("GET", "/api/v1/users/42")).await.status(),
+            StatusCode::Ok
+        );
+        assert_eq!(
+            router.route(make_request("GET", "/users")).await.status(),
+            StatusCode::NotFound
+        );
+    }
+
+    #[tokio::test]
+    async fn router_nest_trailing_slash_on_prefix_normalized() {
+        let mut sub = Router::new();
+        sub.get("/ping", |_ctx| async { Response::new(StatusCode::Ok) });
+
+        let mut router = Router::new();
+        router.nest("/api/", sub);
+
+        assert_eq!(
+            router.route(make_request("GET", "/api/ping")).await.status(),
+            StatusCode::Ok
+        );
+    }
+
+    #[tokio::test]
+    async fn router_nest_existing_routes_retain_priority() {
+        let mut sub = Router::new();
+        sub.get("/path", |_ctx| async { Response::new(StatusCode::Accepted) });
+
+        let mut router = Router::new();
+        router.get("/v1/path", |_ctx| async { Response::new(StatusCode::Ok) });
+        router.nest("/v1", sub);
+
+        assert_eq!(
+            router.route(make_request("GET", "/v1/path")).await.status(),
+            StatusCode::Ok
+        );
+    }
+
+    #[tokio::test]
+    async fn router_nest_deep_nesting() {
+        let mut inner = Router::new();
+        inner.get("/items", |_ctx| async { Response::new(StatusCode::Ok) });
+
+        let mut mid = Router::new();
+        mid.nest("/v1", inner);
+
+        let mut root = Router::new();
+        root.nest("/api", mid);
+
+        assert_eq!(
+            root.route(make_request("GET", "/api/v1/items")).await.status(),
+            StatusCode::Ok
+        );
+    }
+
+    #[tokio::test]
+    async fn router_head_trace_connect_registered() {
+        let mut router = Router::new();
+        router.head("/r", |_ctx| async { Response::new(StatusCode::Ok) });
+        router.trace("/r", |_ctx| async { Response::new(StatusCode::Ok) });
+        router.connect("/r", |_ctx| async { Response::new(StatusCode::Ok) });
+        assert_eq!(
+            router.route(make_request("HEAD", "/r")).await.status(),
+            StatusCode::Ok
+        );
+        assert_eq!(
+            router.route(make_request("TRACE", "/r")).await.status(),
+            StatusCode::Ok
+        );
+        assert_eq!(
+            router.route(make_request("CONNECT", "/r")).await.status(),
             StatusCode::Ok
         );
     }
