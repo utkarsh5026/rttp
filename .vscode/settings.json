@@ -26,14 +26,20 @@
   // Rust / rust-analyzer
   "rust-analyzer.check.command": "clippy",
   "rust-analyzer.cargo.features": "all",
+  "rust-analyzer.cargo.targetDir": "target/ra",
   "rust-analyzer.procMacro.enable": true,
   "rust-analyzer.cargo.buildScripts.enable": true,
+  "rust-analyzer.diagnostics.experimental.enable": true,
   "rust-analyzer.inlayHints.chainingHints.enable": true,
   "rust-analyzer.inlayHints.typeHints.enable": true,
+  "rust-analyzer.inlayHints.parameterHints.enable": true,
+  "rust-analyzer.inlayHints.lifetimeElisionHints.enable": "skip_trivial",
   "rust-analyzer.semanticHighlighting.strings.enable": true,
+  "rust-analyzer.hover.actions.enable": true,
 
   // Editor
   "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": { "source.fixAll": "explicit" },
   "editor.rulers": [100],
   "editor.bracketPairColorization.enabled": true,
   "editor.semanticHighlighting.enabled": true,
