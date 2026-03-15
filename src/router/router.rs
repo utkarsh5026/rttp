@@ -57,59 +57,37 @@ impl<'a> RouteBuilder<'a> {
         Self { router, path: path.to_string() }
     }
 
-    /// Register a `GET` handler on this path.
-    pub fn get(self, handler: impl IntoRouteConfig) -> Self {
-        self.router.routes.push(Route::new(Method::Get, &self.path, handler.into_route_fn()));
+    fn add(self, method: Method, handler: impl IntoRouteConfig) -> Self {
+        self.router.register(method, &self.path, handler);
         self
     }
+
+    /// Register a `GET` handler on this path.
+    pub fn get(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Get, handler) }
 
     /// Register a `POST` handler on this path.
-    pub fn post(self, handler: impl IntoRouteConfig) -> Self {
-        self.router.routes.push(Route::new(Method::Post, &self.path, handler.into_route_fn()));
-        self
-    }
+    pub fn post(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Post, handler) }
 
     /// Register a `PUT` handler on this path.
-    pub fn put(self, handler: impl IntoRouteConfig) -> Self {
-        self.router.routes.push(Route::new(Method::Put, &self.path, handler.into_route_fn()));
-        self
-    }
+    pub fn put(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Put, handler) }
 
     /// Register a `DELETE` handler on this path.
-    pub fn delete(self, handler: impl IntoRouteConfig) -> Self {
-        self.router.routes.push(Route::new(Method::Delete, &self.path, handler.into_route_fn()));
-        self
-    }
+    pub fn delete(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Delete, handler) }
 
     /// Register a `PATCH` handler on this path.
-    pub fn patch(self, handler: impl IntoRouteConfig) -> Self {
-        self.router.routes.push(Route::new(Method::Patch, &self.path, handler.into_route_fn()));
-        self
-    }
+    pub fn patch(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Patch, handler) }
 
     /// Register an `OPTIONS` handler on this path.
-    pub fn options(self, handler: impl IntoRouteConfig) -> Self {
-        self.router.routes.push(Route::new(Method::Options, &self.path, handler.into_route_fn()));
-        self
-    }
+    pub fn options(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Options, handler) }
 
     /// Register a `HEAD` handler on this path.
-    pub fn head(self, handler: impl IntoRouteConfig) -> Self {
-        self.router.routes.push(Route::new(Method::Head, &self.path, handler.into_route_fn()));
-        self
-    }
+    pub fn head(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Head, handler) }
 
     /// Register a `TRACE` handler on this path.
-    pub fn trace(self, handler: impl IntoRouteConfig) -> Self {
-        self.router.routes.push(Route::new(Method::Trace, &self.path, handler.into_route_fn()));
-        self
-    }
+    pub fn trace(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Trace, handler) }
 
     /// Register a `CONNECT` handler on this path.
-    pub fn connect(self, handler: impl IntoRouteConfig) -> Self {
-        self.router.routes.push(Route::new(Method::Connect, &self.path, handler.into_route_fn()));
-        self
-    }
+    pub fn connect(self, handler: impl IntoRouteConfig) -> Self { self.add(Method::Connect, handler) }
 }
 
 /// HTTP request router that dispatches requests to registered handler functions.
@@ -157,6 +135,14 @@ impl Router {
         Self { routes: Vec::new() }
     }
 
+    /// Low-level route registration used by all public method helpers (`get`, `post`, …).
+    ///
+    /// Converts `handler` into a boxed [`HandlerFn`] via [`IntoRouteConfig`], then appends a
+    /// new [`Route`] binding `method` + `path` to that function to the route table.
+    fn register(&mut self, method: Method, path: &str, handler: impl IntoRouteConfig) {
+        self.routes.push(Route::new(method, path, handler.into_route_fn()));
+    }
+
     /// Register a handler for `GET` requests matching `path`.
     ///
     /// # Arguments
@@ -173,7 +159,7 @@ impl Router {
     /// router.get("/hello", |_ctx| async { Response::new(StatusCode::Ok) });
     /// ```
     pub fn get(&mut self, path: &str, handler: impl IntoRouteConfig) {
-        self.routes.push(Route::new(Method::Get, path, handler.into_route_fn()));
+        self.register(Method::Get, path, handler);
     }
 
     /// Register a handler for `POST` requests matching `path`.
@@ -192,7 +178,7 @@ impl Router {
     /// router.post("/users", |_ctx| async { Response::new(StatusCode::Created) });
     /// ```
     pub fn post(&mut self, path: &str, handler: impl IntoRouteConfig) {
-        self.routes.push(Route::new(Method::Post, path, handler.into_route_fn()));
+        self.register(Method::Post, path, handler);
     }
 
     /// Register a handler for `PUT` requests matching `path`.
@@ -211,7 +197,7 @@ impl Router {
     /// router.put("/users/:id", |_ctx| async { Response::new(StatusCode::Ok) });
     /// ```
     pub fn put(&mut self, path: &str, handler: impl IntoRouteConfig) {
-        self.routes.push(Route::new(Method::Put, path, handler.into_route_fn()));
+        self.register(Method::Put, path, handler);
     }
 
     /// Register a handler for `DELETE` requests matching `path`.
@@ -230,7 +216,7 @@ impl Router {
     /// router.delete("/users/:id", |_ctx| async { Response::new(StatusCode::Ok) });
     /// ```
     pub fn delete(&mut self, path: &str, handler: impl IntoRouteConfig) {
-        self.routes.push(Route::new(Method::Delete, path, handler.into_route_fn()));
+        self.register(Method::Delete, path, handler);
     }
 
     /// Register a handler for `OPTIONS` requests matching `path`.
@@ -249,7 +235,7 @@ impl Router {
     /// router.options("/users", |_ctx| async { Response::new(StatusCode::Ok) });
     /// ```
     pub fn options(&mut self, path: &str, handler: impl IntoRouteConfig) {
-        self.routes.push(Route::new(Method::Options, path, handler.into_route_fn()));
+        self.register(Method::Options, path, handler);
     }
 
     /// Register a handler for `PATCH` requests matching `path`.
@@ -268,7 +254,7 @@ impl Router {
     /// router.patch("/users/:id", |_ctx| async { Response::new(StatusCode::Ok) });
     /// ```
     pub fn patch(&mut self, path: &str, handler: impl IntoRouteConfig) {
-        self.routes.push(Route::new(Method::Patch, path, handler.into_route_fn()));
+        self.register(Method::Patch, path, handler);
     }
 
     /// Register a handler for `HEAD` requests matching `path`.
@@ -290,7 +276,7 @@ impl Router {
     /// router.head("/users/:id", |_ctx| async { Response::new(StatusCode::Ok) });
     /// ```
     pub fn head(&mut self, path: &str, handler: impl IntoRouteConfig) {
-        self.routes.push(Route::new(Method::Head, path, handler.into_route_fn()));
+        self.register(Method::Head, path, handler);
     }
 
     /// Register a handler for `TRACE` requests matching `path`.
@@ -309,7 +295,7 @@ impl Router {
     /// router.trace("/echo", |_ctx| async { Response::new(StatusCode::Ok) });
     /// ```
     pub fn trace(&mut self, path: &str, handler: impl IntoRouteConfig) {
-        self.routes.push(Route::new(Method::Trace, path, handler.into_route_fn()));
+        self.register(Method::Trace, path, handler);
     }
 
     /// Register a handler for `CONNECT` requests matching `path`.
@@ -328,7 +314,7 @@ impl Router {
     /// router.connect("/tunnel", |_ctx| async { Response::new(StatusCode::Ok) });
     /// ```
     pub fn connect(&mut self, path: &str, handler: impl IntoRouteConfig) {
-        self.routes.push(Route::new(Method::Connect, path, handler.into_route_fn()));
+        self.register(Method::Connect, path, handler);
     }
 
     /// Begin a multi-method registration on `path`, returning a [`RouteBuilder`].
@@ -486,7 +472,7 @@ impl Router {
             }
         }
 
-        Response::new(StatusCode::NotFound)
+        self.fallback_response(path, request.method())
     }
 
     /// Dispatch a pre-built [`Context`] to the first matching route.
@@ -507,7 +493,41 @@ impl Router {
             }
         }
 
-        Response::new(StatusCode::NotFound)
+        self.fallback_response(&path, &method)
+    }
+
+    /// Builds the fallback response when no route matched the incoming method.
+    ///
+    /// - Returns `404 Not Found` when the path is not registered at all.
+    /// - Returns `200 OK` with an `Allow` header for `OPTIONS` requests (CORS preflight).
+    /// - Returns `405 Method Not Allowed` with an `Allow` header otherwise.
+    fn fallback_response(&self, path: &str, method: &Method) -> Response {
+        let allowed = self.allowed_methods(path);
+        if allowed.is_empty() {
+            return Response::new(StatusCode::NotFound);
+        }
+
+        let allow_value = allowed.join(", ");
+
+        if method == &Method::Options {
+            return Response::new(StatusCode::Ok).header("Allow", allow_value);
+        }
+
+        Response::new(StatusCode::MethodNotAllowed).header("Allow", allow_value)
+    }
+
+    /// Returns a sorted list of HTTP method names registered for the given path,
+    /// by checking all routes whose pattern matches `path` regardless of method.
+    fn allowed_methods(&self, path: &str) -> Vec<String> {
+        let mut methods: Vec<String> = self
+            .routes
+            .iter()
+            .filter(|r| r.pattern.matches(path).is_some())
+            .map(|r| r.method.to_string())
+            .collect();
+        methods.sort_unstable();
+        methods.dedup();
+        methods
     }
 }
 
@@ -564,7 +584,7 @@ mod tests {
         let mut router = Router::new();
         router.get("/hello", |_ctx| async { Response::new(StatusCode::Ok) });
         let res = router.handle(make_request("POST", "/hello")).await;
-        assert_eq!(res.status(), StatusCode::NotFound);
+        assert_eq!(res.status(), StatusCode::MethodNotAllowed);
     }
 
     #[tokio::test]
@@ -724,14 +744,58 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn route_builder_unregistered_method_returns_404() {
+    async fn route_builder_unregistered_method_returns_405() {
         let mut router = Router::new();
         router.route("/items").get(|_ctx| async { Response::new(StatusCode::Ok) });
 
         assert_eq!(
             router.handle(make_request("DELETE", "/items")).await.status(),
-            StatusCode::NotFound
+            StatusCode::MethodNotAllowed
         );
+    }
+
+    #[tokio::test]
+    async fn wrong_method_returns_405_with_allow_header() {
+        let mut router = Router::new();
+        router.get("/hello", |_ctx| async { Response::new(StatusCode::Ok) });
+
+        let res = router.handle(make_request("POST", "/hello")).await;
+        assert_eq!(res.status(), StatusCode::MethodNotAllowed);
+        assert!(res.headers().get("allow").is_some(), "Allow header must be present");
+        let allow = res.headers().get("allow").unwrap();
+        assert!(allow.contains("GET"), "Allow header must list GET");
+    }
+
+    #[tokio::test]
+    async fn options_auto_response_when_no_explicit_handler() {
+        let mut router = Router::new();
+        router.get("/hello", |_ctx| async { Response::new(StatusCode::Ok) });
+        router.post("/hello", |_ctx| async { Response::new(StatusCode::Created) });
+
+        let res = router.handle(make_request("OPTIONS", "/hello")).await;
+        assert_eq!(res.status(), StatusCode::Ok);
+        let allow = res.headers().get("allow").expect("Allow header must be present");
+        assert!(allow.contains("GET"));
+        assert!(allow.contains("POST"));
+    }
+
+    #[tokio::test]
+    async fn options_explicit_handler_takes_priority() {
+        let mut router = Router::new();
+        router.get("/hello", |_ctx| async { Response::new(StatusCode::Ok) });
+        router.options("/hello", |_ctx| async { Response::new(StatusCode::NoContent) });
+
+        let res = router.handle(make_request("OPTIONS", "/hello")).await;
+        assert_eq!(res.status(), StatusCode::NoContent);
+    }
+
+    #[tokio::test]
+    async fn unknown_path_still_returns_404() {
+        let mut router = Router::new();
+        router.get("/hello", |_ctx| async { Response::new(StatusCode::Ok) });
+
+        let res = router.handle(make_request("POST", "/nonexistent")).await;
+        assert_eq!(res.status(), StatusCode::NotFound);
     }
 
     #[tokio::test]
