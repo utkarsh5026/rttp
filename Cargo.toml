@@ -82,15 +82,25 @@ tokio = { version = "1", features = ["full"] }
 # Subscriber for examples — not exposed to library consumers
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
+[[example]]
+name = "hello_world"
+path = "examples/hello_world.rs"
+
+[[example]]
+name = "todo_api"
+path = "examples/todo_api.rs"
+
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+panic = "abort"
 
 [profile.dev]
 opt-level = 0
 debug = 1  # line tables only — faster link, smaller binary
+split-debuginfo = "unpacked"  # keep debug info in .dwo files — faster incremental links
 
 [profile.dev.package."*"]
 opt-level = 2  # compile deps at O2 even in dev (tokio, bytes, etc.)
