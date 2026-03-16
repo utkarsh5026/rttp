@@ -50,7 +50,7 @@
   },
 
   // Pre-fetch dependencies and install useful cargo tools after container creation
-  "postCreateCommand": "cargo fetch && cargo install cargo-audit cargo-watch && pip install --quiet rich",
+  "postCreateCommand": "cargo fetch && cargo install cargo-binstall && cargo binstall -y cargo-audit cargo-watch cargo-deny cargo-llvm-cov bacon && curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin && pip3 install --quiet rich && curl -1sLf 'https://dl.cloudsmith.io/public/evilmartians/lefthook/setup.deb.sh' | sudo bash && sudo apt-get install -y lefthook && lefthook install",
 
   "remoteUser": "vscode",
 

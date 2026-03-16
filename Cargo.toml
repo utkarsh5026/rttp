@@ -95,10 +95,12 @@ opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+panic = "abort"
 
 [profile.dev]
 opt-level = 0
 debug = 1  # line tables only — faster link, smaller binary
+split-debuginfo = "unpacked"  # keep debug info in .dwo files — faster incremental links
 
 [profile.dev.package."*"]
 opt-level = 2  # compile deps at O2 even in dev (tokio, bytes, etc.)
